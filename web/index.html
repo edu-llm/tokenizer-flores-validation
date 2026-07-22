@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tokenizer FLORES Metrics</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1>Tokenizer FLORES Metrics</h1>
+      <p id="caption" class="caption"></p>
+    </header>
+
+    <section class="controls">
+      <label for="metric-select">Score</label>
+      <select id="metric-select"></select>
+      <aside id="explanation" class="explanation" aria-live="polite"></aside>
+    </section>
+
+    <section class="panels">
+      <div class="panel">
+        <h2 id="table-title">Table</h2>
+        <div class="table-wrap">
+          <table id="metrics-table"></table>
+        </div>
+      </div>
+      <div class="panel">
+        <h2 id="heatmap-title">Heatmap (worse → redder)</h2>
+        <div id="heatmap" class="heatmap"></div>
+        <p class="legend-note">
+          Color scales by severity within this metric. Redder = worse for the selected score.
+        </p>
+      </div>
+    </section>
+
+    <script src="data.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

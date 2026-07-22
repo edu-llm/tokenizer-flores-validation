@@ -1,0 +1,24 @@
+{
+  "dataset": "FLORES-200",
+  "split": "devtest",
+  "reference_language": "eng_Latn",
+  "arabic_dialect_choice": {
+    "arz_Arab": "Egyptian Arabic",
+    "ary_Arab": "Moroccan Arabic",
+    "rationale": "Geographically distinct dialects both present in FLORES-200"
+  },
+  "languages": [
+    {"code": "swh_Latn", "name": "Swahili", "continent": "Africa", "script": "Latn"},
+    {"code": "hau_Latn", "name": "Hausa", "continent": "Africa", "script": "Latn"},
+    {"code": "amh_Ethi", "name": "Amharic", "continent": "Africa", "script": "Ethi"},
+    {"code": "ory_Orya", "name": "Odia", "continent": "Asia", "script": "Orya"},
+    {"code": "zho_Hans", "name": "Mandarin", "continent": "Asia", "script": "Hans", "cjk": true},
+    {"code": "arz_Arab", "name": "Egyptian Arabic", "continent": "Asia", "script": "Arab"},
+    {"code": "ary_Arab", "name": "Moroccan Arabic", "continent": "Asia", "script": "Arab"},
+    {"code": "hun_Latn", "name": "Hungarian", "continent": "Europe", "script": "Latn"},
+    {"code": "ukr_Cyrl", "name": "Ukrainian", "continent": "Europe", "script": "Cyrl"},
+    {"code": "eng_Latn", "name": "English", "continent": "Europe", "script": "Latn", "role": "control"},
+    {"code": "quy_Latn", "name": "Quechua (Ayacucho)", "continent": "Americas", "script": "Latn", "note": "Substituted for Nahuatl, which is absent from FLORES-200/FLORES+"},
+    {"code": "grn_Latn", "name": "Guarani", "continent": "Americas", "script": "Latn"}
+  ]
+}

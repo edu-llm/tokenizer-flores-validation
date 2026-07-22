@@ -1,0 +1,71 @@
+{
+  "encoding_policy": {
+    "add_special_tokens": false,
+    "note": "Exclude BOS/EOS from CTC so corpus counts reflect content tokens only"
+  },
+  "tokenizers": [
+    {
+      "id": "o200k",
+      "name": "OpenAI o200k_base",
+      "loader": "tiktoken",
+      "source": "o200k_base",
+      "frontier": true
+    },
+    {
+      "id": "o200k_grapheme",
+      "name": "o200k + grapheme-healed pretok",
+      "loader": "tiktoken+UAX29_heal",
+      "source": "o200k_base+UAX29_heal",
+      "frontier": false,
+      "role": "o200k_intervention",
+      "note": "Only o200k addition: NFKC, heal o200k regex pretok spans onto UAX #29 grapheme boundaries, then BPE via _encode_single_piece (frozen merges). Not SCRIPT pretok; not SuperBPE; not a retrain."
+    },
+    {
+      "id": "glm",
+      "name": "GLM-5.2",
+      "loader": "transformers.AutoTokenizer",
+      "source": "zai-org/GLM-5.2",
+      "trust_remote_code": true,
+      "frontier": true,
+      "note": "Load tokenizer files only; no model weights needed for encoding"
+    },
+    {
+      "id": "llama",
+      "name": "Llama-3.1-8B",
+      "loader": "transformers.AutoTokenizer",
+      "source": "meta-llama/Meta-Llama-3.1-8B",
+      "frontier": true,
+      "note": "Gated repo; HF login may be required for tokenizer download"
+    },
+    {
+      "id": "qwen",
+      "name": "Qwen2.5-7B",
+      "loader": "transformers.AutoTokenizer",
+      "source": "Qwen/Qwen2.5-7B",
+      "frontier": true
+    },
+    {
+      "id": "multi",
+      "name": "NLLB-200 distilled 600M",
+      "loader": "transformers.AutoTokenizer",
+      "source": "facebook/nllb-200-distilled-600M",
+      "frontier": false,
+      "role": "multilingual_baseline"
+    },
+    {
+      "id": "grapheme",
+      "name": "Unicode extended grapheme clusters (UAX #29)",
+      "loader": "grapheme_cluster_segmenter",
+      "source": "UAX #29",
+      "frontier": false,
+      "role": "atomic_unit_baseline",
+      "note": "Each extended grapheme cluster is one token; works for all 12 languages without G2P. Full IPA+ipatok not used as the main baseline."
+    }
+  ],
+  "optional_phonic_sketch": {
+    "id": "english_ipa_ipatok",
+    "required_for_go_nogo": false,
+    "pipeline": "espeak-ng IPA (English) -> ipatok phoneme tokens",
+    "note": "Illustration only; not a full 12-language column"
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "normalization": "NFKC",
+  "metrics": [
+    {
+      "id": "ctc",
+      "name": "Corpus token count",
+      "definition": "Sum of token ids over all sentences in the language slice",
+      "special_tokens": "excluded"
+    },
+    {
+      "id": "token_premium",
+      "name": "Token premium",
+      "definition": "CTC(lang) / CTC(eng_Latn) for the same tokenizer",
+      "reference": "Arnett et al. (crosslingual token premiums / CTC on parallel text)",
+      "english_value": 1.0
+    },
+    {
+      "id": "fertility",
+      "name": "Token fertility",
+      "definition": "CTC / whitespace_word_count after NFKC",
+      "reference": "Petrov et al.",
+      "cjk_note": "For zho_Hans also report tokens_per_char; do not compare whitespace fertility to Latin langs"
+    },
+    {
+      "id": "chars_per_token",
+      "name": "Characters per token",
+      "definition": "count of non-whitespace Unicode code points after NFKC / CTC",
+      "reference": "Somide, The African Language Tax (CPT)"
+    },
+    {
+      "id": "strr",
+      "name": "Single Token Retention Rate",
+      "definition": "(# whitespace words encoded as exactly 1 token) / (# whitespace words)",
+      "higher_is_better": true,
+      "cjk_note": "Not reported for zho_Hans; use STFR and chars/token instead"
+    },
+    {
+      "id": "stfr",
+      "name": "Single Token Fragmentation Rate",
+      "definition": "(# tokens whose decoded surface form has length 1) / CTC",
+      "higher_means_more_shredding": true,
+      "note": "Named STFR to avoid confusion with type-token ratio (TTR)"
+    }
+  ],
+  "baselines": {
+    "grapheme_cluster": {
+      "name": "Unicode extended grapheme clusters (UAX #29)",
+      "role": "atomic_unit_baseline",
+      "applies_to": "all_12_languages",
+      "note": "Stand-in when multilingual G2P/IPA is not resource-feasible; full IPA+ipatok not in scope for all langs"
+    },
+    "optional_english_ipa_ipatok": {
+      "required_for_go_nogo": false,
+      "note": "Optional one-language phonic sketch only if espeak-ng IPA for English is easy"
+    }
+  },
+  "decision_rule": {
+    "clause_a": "non-English language with token_premium >= 2.0 on >= 2 frontier tokenizers (o200k, glm, llama, qwen)",
+    "clause_b": "fertility (or tokens/char for CJK) >= 2x English on the same tokenizer for complex/non-Latin languages",
+    "verdict": "worth_pursuing = clause_a OR clause_b"
+  }
+}

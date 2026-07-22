@@ -1,0 +1,166 @@
+# Tokenizer Multilingual Efficiency Validation
+
+General experiment plan
+
+---
+
+## 1. Goal
+
+Determine whether current frontier and multilingual tokenizers still treat languages unequally—through fragmented, inefficient tokenization—on a small but geographically diverse parallel corpus. The outcome is a go / no-go decision: if large, systematic disparities remain, investing in a fairer (for example, phonic) tokenizer is justified; if not, the research direction should be reconsidered before further investment.
+
+Differentiation (beyond replicating known fertility / premium tables) comes from **fragmentation-quality metrics (STRR, STFR)** and an **atomic grapheme-cluster baseline** that does not require multilingual grapheme-to-phoneme resources.
+
+**Decision rule.** The direction is worth pursuing if either:
+
+- at least one non-English language shows a **token premium of 2.0 or higher** on at least two of the frontier tokenizers (o200k, GLM-5.2, Llama, Qwen); or
+- mean **token fertility** for a non-Latin or morphologically complex language is at least **twice** that of English on the same tokenizer.
+
+---
+
+## 2. Experiment Explanation
+
+A growing body of work shows that multilingual inequity often appears at the tokenizer, before any model is invoked.
+
+Petrov, La Malfa, Torr, and Bibi (Language Model Tokenizers Introduce Unfairness Between Languages, NeurIPS 2023) showed that the same content translated across languages can require drastically different numbers of tokens—differences of up to about fifteen times—even under tokenizers intended for multilingual use. They frame this as unfairness in cost, latency, and usable context, and argue for multilingually fairer subword vocabularies. That paper is the methodological touchstone for measuring how densely a tokenizer covers each language on parallel text.
+
+Dixit and Dixit (The Script Tax) strengthen the case that writing system and orthography drive fragmentation: for identical linguistic content, higher-fragmentation orthographies show much higher fertility and large inference slowdowns, so script is a first-order design variable—not a detail.
+
+Somide (The African Language Tax) evaluates frontier and open tokenizers on African languages with parallel corpora (including FLORES-200+), reporting fertility and English-relative premiums and translating those gaps into cost, latency, and context-window penalties. The study also reports character- and byte-normalized efficiency metrics so conclusions do not rest on word counts alone—especially for scripts and morphologies where whitespace segmentation is unreliable.
+
+Arnett, Chang, Biderman, and Bergen (Explaining and Mitigating Crosslingual Tokenizer Inequities) treat disparities in how many tokens parallel text needs across languages as token premiums, operationalized via corpus token counts on FLORES-200 and related to compression, vocabulary size, and pre-tokenization. Related work by Arnett and Bergen on morphologically complex languages further motivates including agglutinative and under-resourced languages in any fairness audit.
+
+Complementary compression-oriented studies (tokenization and the noiseless channel; unpacking tokenization versus model quality) reinforce that encode-time statistics are a legitimate evaluation target in their own right.
+
+**This experiment.** We take a fixed parallel slice of FLORES-200 (devtest), encode every sentence with each candidate tokenizer **and** with a grapheme-cluster atomic baseline, and compare languages on token fertility, characters per token, English-relative token premium, **STRR**, and **STFR**. Disparities at encode time are sufficient for the go / no-go gate; no language-model generation is required. A full IPA→ipatok phonic column across all languages is **out of scope** (it needs per-language G2P); an optional English-only IPA sketch may appear in the write-up for illustration only.
+
+---
+
+## 3. The Metrics We Will Measure
+
+All metrics share a **corpus token count (CTC)**: the total number of content tokens produced when encoding the full language side of the parallel slice (special beginning-/end-of-sequence tokens excluded).
+
+### Token fertility — Petrov et al.
+
+**Definition.** Tokens per word: CTC divided by word count after Unicode normalization, with words obtained by a consistent whitespace (or Unicode word-segmentation) rule across languages.
+
+**Why this source.** Petrov et al. established that parallel meaning can be fragmented into far more pieces in some languages than others, and fertility (tokens per word) is the standard scalar for that fragmentation pattern in the unfairness literature they anchor.
+
+**Caveat.** For Mandarin (and other space-light writing systems), whitespace word counts are not comparable across languages; that language is also summarized with a character-normalized view and flagged separately.
+
+### Characters per token — Somide, The African Language Tax
+
+**Definition.** Following Somide’s character-normalized efficiency metric:
+
+characters per token = (Unicode character count of the language side) / CTC
+
+Non-whitespace characters are used so padding and spacing do not inflate the partner count.
+
+**Why this source.** The African Language Tax explicitly reports characters per token (and related byte-per-token views) alongside fertility, so that efficiency claims remain meaningful when word segmentation is imperfect (for example Ethiopic script or highly agglutinative languages). Lower characters per token means each token carries less orthographic content—the encode-time inefficiency that Somide links to higher cost, latency, and context pressure.
+
+### Token premium — Arnett et al.
+
+**Definition.** For a given tokenizer, the ratio of corpus token counts on parallel text:
+
+token premium(L) = CTC(L) / CTC(English)
+
+English is 1.0 by construction.
+
+**Why this source.** Arnett et al. define token premiums as disparities in how many tokens are needed to encode parallel text across languages, measured with corpus token counts on FLORES-200 and normalized relative to a reference language. Higher premium means worse compression and a larger tax in training throughput and inference cost for that language.
+
+### STRR — Single Token Retention Rate
+
+**Definition.** Share of whitespace-delimited words that encode to **exactly one** token:
+
+STRR = (# words with token count = 1) / (# whitespace words)
+
+Higher STRR means more words remain intact as a single subword piece (less word-level breakup). Complements fertility: fertility asks how many tokens per word on average; STRR asks how often a word is not split at all.
+
+**Caveat.** STRR is **not reported for Mandarin** (`zho_Hans`), where whitespace word counts are not comparable. For Mandarin, rely on STFR, characters per token, and tokens-per-character views instead.
+
+### STFR — Single Token Fragmentation Rate
+
+**Definition.** Share of emitted tokens whose decoded surface form has **length 1** (one character):
+
+STFR = (# tokens with surface length = 1) / CTC
+
+Higher STFR means more character-level shredding—“tiny” fragments that often look semantically empty. (Named STFR rather than TTR to avoid confusion with the usual NLP type–token ratio.)
+
+---
+
+## 4. Scope
+
+### Tokenizers
+
+| Short name | System |
+|------------|--------|
+| o200k | OpenAI o200k_base |
+| GLM | GLM-5.2 |
+| Llama | Llama 3.1 family tokenizer |
+| Qwen | Qwen2.5 family tokenizer |
+| Multilingual baseline | NLLB-200 (multilingual SentencePiece reference) |
+| Grapheme baseline | Unicode extended grapheme clusters (UAX #29), each cluster = one token |
+
+Frontier systems for the decision rule: o200k, GLM, Llama, and Qwen. NLLB-200 is a multilingual baseline, not a frontier gate.
+
+**Grapheme-cluster atomic baseline.** Segments orthographic text into Unicode extended grapheme clusters and treats each cluster as one token. This runs for **all twelve languages** with no grapheme-to-phoneme (G2P) models. It answers: “What does a fair *atomic* segmentation look like?”—a cheap stand-in when a true phonic inventory is not resource-feasible.
+
+**Not in scope as a full column:** IPA → ipatok across all languages (ipatok only tokenizes IPA strings; FLORES is orthography and would need per-language G2P). **Optional sketch only (not required for go/no-go):** if English IPA is easy (e.g. via espeak-ng), run IPA → ipatok on English alone as a one-language phonic illustration in the write-up.
+
+### Languages (FLORES-200)
+
+Twelve languages, stratified by continent, with English as the control:
+
+| Continent | Languages |
+|-----------|-----------|
+| Africa | Swahili, Hausa, Amharic |
+| Asia | Odia, Mandarin, Egyptian Arabic, Moroccan Arabic |
+| Europe | Hungarian, Ukrainian, English (control) |
+| Americas | Quechua (Ayacucho), Guarani |
+
+**Corpus.** FLORES-200 **devtest**: professionally translated parallel sentences so comparisons hold content fixed across languages.
+
+**Designed contrasts (call out in results, not extra languages):** Egyptian vs Moroccan Arabic (dialect); Quechua, Guarani, Odia, and Amharic as coverage-gap / script-stress languages. (Quechua replaces Nahuatl, which is absent from FLORES-200/FLORES+.)
+
+---
+
+## 5. Pipeline
+
+1. Select the twelve FLORES-200 language sides of the shared devtest split (parallel by sentence).
+2. Encode every sentence with each of the five neural/subword tokenizers under a consistent content-token policy.
+3. Additionally segment every sentence with the **grapheme-cluster** baseline (UAX #29) and treat each cluster as a token.
+4. Aggregate, per language and tokenizer (including grapheme): corpus token count, word count, character count, and per-token surface lengths.
+5. Derive token fertility, characters per token, token premium versus English, **STRR** (where defined), and **STFR**.
+6. Summarize with language × tokenizer tables (including STRR/STFR), a token-premium heatmap, continent-level mean premiums (excluding English), and a callout of frontier BPE **STFR** versus the grapheme baseline (how much extra shredding BPE adds beyond atomic units).
+7. Apply the go / no-go decision rule in §1 and record which languages and tokenizers drive the result.
+
+---
+
+## 6. Deliverables
+
+1. **Comparison tables** — token fertility, characters per token, token premium, **STRR**, and **STFR** for every language × tokenizer pair (including grapheme baseline; STRR omitted for Mandarin).
+2. **Token-premium heatmap** — languages × tokenizers, English-normalized.
+3. **Continent summary** — mean token premium for Africa, Asia, Europe (non-English), and the Americas.
+4. **Fragmentation callout** — frontier STFR vs grapheme-cluster STFR/atomic length, plus designed contrasts (Arabic dialects; Americas + Odia + Amharic).
+5. **Go / no-go write-up** — a short verdict against the decision rule, naming the languages that most stress each tokenizer, situated against Petrov et al., Somide (The African Language Tax), and Arnett et al., and stating whether empty/character-level fragmentation (STFR) plus length tax justifies pursuing a phonic direction.
+
+---
+
+*Planning document only. Local encode-only; no AWS.*
+
+---
+
+## 7. Intervention: A Grapheme-Aware Wrap Over o200k
+
+Beyond measuring the tax, we test one small, training-free change to OpenAI's o200k tokenizer to see whether it improves our fragmentation metrics without retraining the vocabulary. This is the only modification we add to o200k; we deliberately avoid a full tokenizer retrain (for example SuperBPE or a grapheme-seeded BPE), which would no longer be "o200k" and would require new model embeddings.
+
+**What it is.** A wrapper, `o200k_grapheme`, that keeps o200k's frozen merge table and its regular-expression pre-tokenizer, but refuses to cut a pre-token in the middle of a Unicode extended grapheme cluster (UAX #29). Concretely, for each sentence we (1) apply Unicode NFKC normalization, (2) run o200k's own pre-tokenizer, (3) merge any spans whose boundaries fall inside a grapheme cluster so that base characters stay attached to their combining marks, and (4) encode each healed span with o200k's byte-pair merges only, skipping a second regular-expression split. The vocabulary and merge rules are unchanged; only the pre-tokenization boundaries are corrected.
+
+**Why this design.** Prior work (Velayuthan and Sarveswaran; Land and Arnett) shows that pre-tokenization choices affect multilingual tokenization efficiency at least as much as the merge algorithm, and that regular-expression pre-tokenizers can split combining marks away from their base characters in scripts such as those used for Odia, Amharic, and Arabic. Healing those cuts is the cheapest lever that still respects the frozen o200k vocabulary. We do not replace the pre-tokenizer with a whitespace splitter: that would discard o200k's space-prefixed tokens (for example the single token for " world"), inflate English token counts, and make token premiums look better for the wrong reason.
+
+**How we evaluate it.** `o200k_grapheme` is scored on the same twelve languages and the same metrics as every other tokenizer—fertility, characters per token, token premium versus English, STRR, and STFR—and reported directly beside raw `o200k`. The headline comparison is the change in STFR and fertility on mark-heavy scripts (Odia, Amharic, the two Arabic dialects) when moving from `o200k` to `o200k_grapheme`.
+
+**Honest expectation.** o200k's pre-tokenizer already keeps most combining marks with their base (its pattern includes the Unicode "Mark" category), so on much of FLORES this wrap is a no-op and the metrics will match raw o200k. Where it differs, it can only reduce mid-grapheme splitting; it cannot remove the byte-level premium that non-Latin scripts pay in a byte-pair vocabulary. Large gains in STRR and STFR would require training a new grapheme- or character-integrity-aware tokenizer, which we flag as the follow-on recommendation rather than something a wrap can deliver.
+
+---
+
+*Planning document only. Local encode-only; no AWS.*
