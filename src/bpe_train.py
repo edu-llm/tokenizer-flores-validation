@@ -97,6 +97,59 @@ def build_gconstr_word_freqs(
     return freqs
 
 
+def _word_byte_mass(word: tuple[bytes, ...] | tuple[GCToken, ...]) -> int:
+    """Total UTF-8 byte length represented by a pretoken's initial atoms."""
+    if not word:
+        return 0
+    if isinstance(word[0], tuple):
+        return sum(len(tok[0]) for tok in word)  # type: ignore[union-attr]
+    return sum(len(atom) for atom in word)  # type: ignore[arg-type]
+
+
+def _lang_raw_byte_mass(freqs: Counter) -> float:
+    return sum(float(count) * _word_byte_mass(word) for word, count in freqs.items())
+
+
+def build_weighted_word_freqs(
+    by_lang: dict[str, list[str]],
+    weights: dict[str, float],
+    unit: Unit,
+    pat: re.Pattern[str] | None = None,
+) -> Counter:
+    """Build per-language pretoken-atom counters, then reweight by target byte-mass share."""
+    if pat is None:
+        pat = o200k_pattern()
+
+    per_lang: dict[str, Counter] = {}
+    raw_masses: dict[str, float] = {}
+
+    for lang, texts in by_lang.items():
+        if lang not in weights:
+            continue
+        if unit == "grapheme_constrained":
+            freqs = build_gconstr_word_freqs(texts, pat)
+        else:
+            freqs = build_word_freqs(texts, unit, pat)
+        per_lang[lang] = freqs
+        raw_masses[lang] = _lang_raw_byte_mass(freqs)
+
+    total_raw = sum(raw_masses.values())
+    if total_raw <= 0:
+        raise ValueError("No training mass in weighted corpus")
+
+    combined: Counter = Counter()
+    for lang, freqs in per_lang.items():
+        target_share = weights[lang]
+        raw_share = raw_masses[lang] / total_raw
+        if raw_share <= 0:
+            continue
+        scale = target_share / raw_share
+        for word, count in freqs.items():
+            combined[word] += count * scale
+
+    return combined
+
+
 def initial_vocab(word_freqs: Counter[tuple[bytes, ...]], unit: Unit) -> dict[bytes, int]:
     tokens: set[bytes] = set()
     for word in word_freqs:
@@ -238,23 +291,63 @@ def _add_gconstr_word(
         pair_index.setdefault(pair, set()).add(word)
 
 
-def _train_bpe_standard(
-    texts: list[str],
+def train_bpe_from_freqs(
+    word_freqs: Counter,
     *,
-    unit: Literal["byte", "grapheme"],
+    unit: Unit,
     target_vocab_size: int,
-    pat: re.Pattern[str] | None = None,
 ) -> tuple[dict[bytes, int], list[tuple[bytes, bytes]]]:
-    if pat is None:
-        pat = o200k_pattern()
+    """Run BPE merge loop on pre-built (possibly fractional) word frequencies."""
+    word_freqs = Counter(word_freqs)
+    if unit == "grapheme_constrained":
+        gconstr_freqs: Counter[tuple[GCToken, ...]] = word_freqs  # type: ignore[assignment]
+        vocab = initial_gconstr_vocab(gconstr_freqs)
+        merges: list[tuple[bytes, bytes]] = []
 
-    word_freqs = build_word_freqs(texts, unit, pat)
-    vocab = initial_vocab(word_freqs, unit)
-    merges: list[tuple[bytes, bytes]] = []
+        pair_counts: Counter[tuple[bytes, bytes]] = Counter()
+        pair_index: dict[tuple[bytes, bytes], set[tuple[GCToken, ...]]] = {}
+        for word, freq in gconstr_freqs.items():
+            _add_gconstr_word(word, freq, pair_counts, pair_index)
+
+        while len(vocab) < target_vocab_size:
+            pair = best_pair(pair_counts)
+            if pair is None:
+                break
+            left, right = pair
+            merged = left + right
+            if merged in vocab:
+                pair_counts[pair] = 0
+                continue
+
+            vocab[merged] = len(vocab)
+            merges.append(pair)
+
+            affected = list(pair_index.get(pair, ()))
+            for word in affected:
+                if word not in gconstr_freqs:
+                    continue
+                freq = gconstr_freqs.pop(word)
+                _remove_gconstr_word(word, freq, pair_counts, pair_index)
+                new_word = merge_pair_in_gconstr_word(word, pair, merged)
+
+                if new_word in gconstr_freqs:
+                    existing = gconstr_freqs.pop(new_word)
+                    _remove_gconstr_word(new_word, existing, pair_counts, pair_index)
+                    freq += existing
+
+                gconstr_freqs[new_word] = freq
+                _add_gconstr_word(new_word, freq, pair_counts, pair_index)
+
+        return vocab, merges
+
+    std_freqs: Counter[tuple[bytes, ...]] = word_freqs  # type: ignore[assignment]
+    std_unit: Literal["byte", "grapheme"] = unit  # type: ignore[assignment]
+    vocab = initial_vocab(std_freqs, std_unit)
+    merges = []
 
     pair_counts: Counter[tuple[bytes, bytes]] = Counter()
     pair_index: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]] = {}
-    for word, freq in word_freqs.items():
+    for word, freq in std_freqs.items():
         _add_word(word, freq, pair_counts, pair_index)
 
     while len(vocab) < target_vocab_size:
@@ -272,69 +365,19 @@ def _train_bpe_standard(
 
         affected = list(pair_index.get(pair, ()))
         for word in affected:
-            if word not in word_freqs:
+            if word not in std_freqs:
                 continue
-            freq = word_freqs.pop(word)
+            freq = std_freqs.pop(word)
             _remove_word(word, freq, pair_counts, pair_index)
             new_word = merge_pair_in_word(word, pair, merged)
 
-            if new_word in word_freqs:
-                existing = word_freqs.pop(new_word)
+            if new_word in std_freqs:
+                existing = std_freqs.pop(new_word)
                 _remove_word(new_word, existing, pair_counts, pair_index)
                 freq += existing
 
-            word_freqs[new_word] = freq
+            std_freqs[new_word] = freq
             _add_word(new_word, freq, pair_counts, pair_index)
-
-    return vocab, merges
-
-
-def _train_bpe_grapheme_constrained(
-    texts: list[str],
-    *,
-    target_vocab_size: int,
-    pat: re.Pattern[str] | None = None,
-) -> tuple[dict[bytes, int], list[tuple[bytes, bytes]]]:
-    if pat is None:
-        pat = o200k_pattern()
-
-    word_freqs = build_gconstr_word_freqs(texts, pat)
-    vocab = initial_gconstr_vocab(word_freqs)
-    merges: list[tuple[bytes, bytes]] = []
-
-    pair_counts: Counter[tuple[bytes, bytes]] = Counter()
-    pair_index: dict[tuple[bytes, bytes], set[tuple[GCToken, ...]]] = {}
-    for word, freq in word_freqs.items():
-        _add_gconstr_word(word, freq, pair_counts, pair_index)
-
-    while len(vocab) < target_vocab_size:
-        pair = best_pair(pair_counts)
-        if pair is None:
-            break
-        left, right = pair
-        merged = left + right
-        if merged in vocab:
-            pair_counts[pair] = 0
-            continue
-
-        vocab[merged] = len(vocab)
-        merges.append(pair)
-
-        affected = list(pair_index.get(pair, ()))
-        for word in affected:
-            if word not in word_freqs:
-                continue
-            freq = word_freqs.pop(word)
-            _remove_gconstr_word(word, freq, pair_counts, pair_index)
-            new_word = merge_pair_in_gconstr_word(word, pair, merged)
-
-            if new_word in word_freqs:
-                existing = word_freqs.pop(new_word)
-                _remove_gconstr_word(new_word, existing, pair_counts, pair_index)
-                freq += existing
-
-            word_freqs[new_word] = freq
-            _add_gconstr_word(new_word, freq, pair_counts, pair_index)
 
     return vocab, merges
 
@@ -347,11 +390,15 @@ def train_bpe(
     pat: re.Pattern[str] | None = None,
 ) -> tuple[dict[bytes, int], list[tuple[bytes, bytes]]]:
     """Train BPE on *texts* until *target_vocab_size* tokens (including seed alphabet)."""
+    if pat is None:
+        pat = o200k_pattern()
     if unit == "grapheme_constrained":
-        return _train_bpe_grapheme_constrained(
-            texts, target_vocab_size=target_vocab_size, pat=pat
-        )
-    return _train_bpe_standard(texts, unit=unit, target_vocab_size=target_vocab_size, pat=pat)
+        word_freqs = build_gconstr_word_freqs(texts, pat)
+    else:
+        word_freqs = build_word_freqs(texts, unit, pat)
+    return train_bpe_from_freqs(
+        word_freqs, unit=unit, target_vocab_size=target_vocab_size
+    )
 
 
 def _b64(data: bytes) -> str:

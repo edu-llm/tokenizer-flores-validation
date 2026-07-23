@@ -58,6 +58,25 @@ MORPH_CONSTRAINED_EXPLANATION = (
     "is not a net win for these metrics at this scale."
 )
 
+MORPH_SKEW_EXPLANATION = (
+    "Section 3 (Realistic English-skewed) is the strongest test of the "
+    "grapheme-integrity hypothesis. Sections 1-2 trained on a balanced 12-language "
+    "corpus, which is unrealistic: real tokenizers are trained on English-dominated "
+    "data, so tail languages are starved of merge budget and fragment badly. Here "
+    "we reweight the training corpus to a realistic skew (English \u224885% of "
+    "byte-mass, Mandarin 5%, every other language \u22642.5% down to 0.25%), keep the "
+    "byte-seed + no-grapheme-split constraint from Section 2, and evaluate on the "
+    "balanced FLORES devtest so tail languages still count equally. The starved "
+    "regime is exactly where grapheme integrity should help most. It barely does. "
+    "At 16k the constraint gives a small macro win on fertility (-0.50%) and token "
+    "premium (-0.46%), driven by tail scripts (Oriya, Amharic, Egyptian/Moroccan "
+    "Arabic all improve fertility and premium), but STFR is still slightly worse "
+    "(+0.77%). At 8k and 32k the deltas are mixed and tiny, and STFR is worse at "
+    "every vocab size. Conclusion: even under realistic English skew, grapheme "
+    "integrity is at best a marginal, metric-dependent wash for tail languages, not "
+    "the fragmentation fix the hypothesis predicted."
+)
+
 EXPERIMENT_SECTIONS = [
     {
         "id": "morph",
@@ -91,6 +110,27 @@ EXPERIMENT_SECTIONS = [
         "compare_col": "gconstr",
         "compare_plot_label": "morph-constrained BPE",
         "explanation": MORPH_CONSTRAINED_EXPLANATION,
+        "arms": [
+            ("bpe_byte_8k", "byte 8k", "byte", 8000),
+            ("bpe_gconstr_8k", "morph-c 8k", "grapheme_constrained", 8000),
+            ("bpe_byte_16k", "byte 16k", "byte", 16000),
+            ("bpe_gconstr_16k", "morph-c 16k", "grapheme_constrained", 16000),
+            ("bpe_byte_32k", "byte 32k", "byte", 32000),
+            ("bpe_gconstr_32k", "morph-c 32k", "grapheme_constrained", 32000),
+            ("o200k", "o200k (ref)", "reference", 200000),
+        ],
+    },
+    {
+        "id": "morph_skew",
+        "title": "Section 3: Realistic (English-skewed)",
+        "source": "English-skewed training (\u224885% English byte-mass) \u00b7 byte vs morph-constrained \u00b7 eval on balanced FLORES-200 devtest \u00b7 12 languages",
+        "metrics_path": ROOT / "artifacts" / "bpe_skew" / "eval_metrics.json",
+        "summary_path": ROOT / "artifacts" / "bpe_skew" / "ab_summary_macro.csv",
+        "plot_src": ROOT / "artifacts" / "bpe_skew" / "gap_vs_vocab_size.png",
+        "plot_web": "gap_vs_vocab_size_skew.png",
+        "compare_col": "gconstr",
+        "compare_plot_label": "morph-constrained BPE (skewed train)",
+        "explanation": MORPH_SKEW_EXPLANATION,
         "arms": [
             ("bpe_byte_8k", "byte 8k", "byte", 8000),
             ("bpe_gconstr_8k", "morph-c 8k", "grapheme_constrained", 8000),
