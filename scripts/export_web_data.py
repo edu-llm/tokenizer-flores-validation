@@ -10,13 +10,25 @@ METRICS_PATH = ROOT / "results" / "metrics.json"
 LANGS_PATH = ROOT / "artifacts" / "languages.json"
 OUT_PATH = ROOT / "web" / "data.js"
 
-TOKENIZER_ORDER = ["o200k", "glm", "llama", "qwen", "multi"]
+TOKENIZER_ORDER = [
+    "o200k",
+    "glm",
+    "llama",
+    "qwen",
+    "multi",
+    "unigram",
+    "wordpiece",
+    "superbpe",
+]
 TOKENIZER_LABELS = {
     "o200k": "o200k",
     "glm": "GLM-5.2",
     "llama": "Llama 3.1",
     "qwen": "Qwen2.5",
     "multi": "NLLB-200",
+    "unigram": "mT5 (Unigram)",
+    "wordpiece": "mBERT (WordPiece)",
+    "superbpe": "SuperBPE t180k",
 }
 
 METRIC_META = [

@@ -1,6 +1,6 @@
 # Tokenizer FLORES Validation
 
-Encode-only multilingual tokenizer efficiency on FLORES-200 **devtest** across 12 languages and 5 tokenizers.
+Encode-only multilingual tokenizer efficiency on FLORES-200 **devtest** across 12 languages and 8 tokenizers.
 
 ## What this measures
 
@@ -8,12 +8,12 @@ Each tokenizer encodes the full FLORES-200 devtest split for a locked set of 12 
 
 | Metric | Description |
 |--------|-------------|
-| **CTC** (characters/token) | Mean Unicode code points per token |
-| **Fertility** | Tokens per whitespace-delimited word |
-| **Chars/token** | Same as CTC; reported explicitly in tables |
-| **Token premium** | `CTC_lang / CTC_eng` — relative cost vs English |
-| **STRR** (Single Token Retention Rate) | Share of input words that survive as exactly one token after encode/decode round-trip via per-token surface decode |
-| **STFR** (Single Token Fragmentation Rate) | Share of input words split into multiple tokens |
+| **CTC** (Corpus Token Count) | Total number of tokens produced when encoding the whole language corpus (BOS/EOS excluded). The base count the other metrics derive from. |
+| **Fertility** | Tokens per whitespace-delimited word (`CTC / word_count`) after NFKC |
+| **Chars/token** | Non-whitespace Unicode code points per token (`chars / CTC`) |
+| **Token premium** | `CTC_lang / CTC_eng` — relative token cost vs English |
+| **STRR** (Single Token Retention Rate) | Share of whitespace-delimited words that encode to exactly one token |
+| **STFR** (Single Token Fragmentation Rate) | Share of emitted tokens whose decoded surface form is a single character |
 
 STRR and STFR use per-token surface decode (each token decoded in isolation) to detect fragmentation without full-sequence decoding.
 

@@ -35,6 +35,9 @@ GLM_REPO = "zai-org/GLM-5.2"
 LLAMA_REPO = "meta-llama/Meta-Llama-3.1-8B"
 QWEN_REPO = "Qwen/Qwen2.5-7B"
 NLLB_REPO = "facebook/nllb-200-distilled-600M"
+MT5_REPO = "google/mt5-base"
+MBERT_REPO = "bert-base-multilingual-cased"
+SUPERBPE_REPO = "UW/OLMo2-8B-SuperBPE-t180k"
 
 
 def _tiktoken_surface(enc: tiktoken.Encoding) -> SurfaceFn:
@@ -129,6 +132,26 @@ def load_tokenizers(
             NLLB_REPO,
             False,
             leading_space_for_words=False,
+        ),
+        "unigram": lambda: _hf_spec(
+            "unigram",
+            "mT5 (Unigram)",
+            MT5_REPO,
+            False,
+            leading_space_for_words=False,
+        ),
+        "wordpiece": lambda: _hf_spec(
+            "wordpiece",
+            "mBERT (WordPiece)",
+            MBERT_REPO,
+            False,
+            leading_space_for_words=False,
+        ),
+        "superbpe": lambda: _hf_spec(
+            "superbpe",
+            "SuperBPE t180k",
+            SUPERBPE_REPO,
+            False,
         ),
     }
 

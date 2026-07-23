@@ -53,6 +53,31 @@
       "role": "multilingual_baseline"
     },
     {
+      "id": "unigram",
+      "name": "mT5 (Unigram)",
+      "loader": "transformers.AutoTokenizer",
+      "source": "google/mt5-base",
+      "frontier": false,
+      "family": "Unigram"
+    },
+    {
+      "id": "wordpiece",
+      "name": "mBERT (WordPiece)",
+      "loader": "transformers.AutoTokenizer",
+      "source": "bert-base-multilingual-cased",
+      "frontier": false,
+      "family": "WordPiece"
+    },
+    {
+      "id": "superbpe",
+      "name": "SuperBPE t180k",
+      "loader": "transformers.AutoTokenizer",
+      "source": "UW/OLMo2-8B-SuperBPE-t180k",
+      "frontier": false,
+      "family": "SuperBPE",
+      "note": "English-trained; included for contrast with multilingual baselines"
+    },
+    {
       "id": "grapheme",
       "name": "Unicode extended grapheme clusters (UAX #29)",
       "loader": "grapheme_cluster_segmenter",
