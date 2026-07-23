@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train byte vs grapheme BPE tokenizers at 8k/16k/32k on FLORES dev."""
+"""Train byte / grapheme / parity BPE tokenizers at 8k/16k/32k on FLORES dev."""
 
 from __future__ import annotations
 
@@ -12,15 +12,18 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.bpe_train import (
+    build_lang_word_freqs,
+    build_weighted_lang_freqs,
     build_weighted_word_freqs,
     o200k_pattern,
     save_artifact,
     train_bpe,
     train_bpe_from_freqs,
+    train_parity_bpe_from_lang_freqs,
 )
 from src.load_flores import LANGUAGES, load_flores_sentences
 
-ALL_UNITS = ("byte", "grapheme", "grapheme_constrained")
+ALL_UNITS = ("byte", "grapheme", "grapheme_constrained", "parity")
 SIZES = (8000, 16000, 32000)
 
 ENGLISH_AGGRESSIVE_WEIGHTS: dict[str, float] = {
@@ -43,6 +46,7 @@ UNIT_DIR = {
     "byte": "byte",
     "grapheme": "grapheme",
     "grapheme_constrained": "gconstr",
+    "parity": "parity",
 }
 
 
@@ -134,9 +138,21 @@ def main(argv: list[str] | None = None) -> int:
                 texts.extend(by_lang[code])
         print(f"Training corpus: {len(texts)} sentences from {len(by_lang)} languages")
 
+    # Parallel CR-dev for parity (unweighted FLORES — line-normalized fair-max).
+    need_parity = "parity" in args.units
+    if need_parity:
+        print("Building unweighted FLORES-dev CR counters for parity-aware selection...")
+        dev_by_lang = build_lang_word_freqs(by_lang, unit="byte")
+
     for unit in args.units:
+        skewed_combined = None
+        skewed_by_lang = None
         if use_skew:
-            word_freqs = build_weighted_word_freqs(by_lang, weights, unit)
+            if unit == "parity":
+                skewed_by_lang = build_weighted_lang_freqs(by_lang, weights, "byte")
+            else:
+                skewed_combined = build_weighted_word_freqs(by_lang, weights, unit)
+
         for size in SIZES:
             label = artifact_label(unit, size)
             dest = out_root / label
@@ -144,12 +160,26 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Skipping {label} (artifact exists; use --force to retrain)")
                 continue
             print(f"Training {label} -> {dest} ...", flush=True)
-            if use_skew:
+
+            if unit == "parity":
+                if not use_skew:
+                    train_by_lang = build_lang_word_freqs(by_lang, unit="byte")
+                else:
+                    assert skewed_by_lang is not None
+                    train_by_lang = skewed_by_lang
+                vocab, merges = train_parity_bpe_from_lang_freqs(
+                    train_by_lang,
+                    dev_by_lang,
+                    target_vocab_size=size,
+                )
+            elif use_skew:
+                assert skewed_combined is not None
                 vocab, merges = train_bpe_from_freqs(
-                    word_freqs, unit=unit, target_vocab_size=size
+                    skewed_combined, unit=unit, target_vocab_size=size
                 )
             else:
                 vocab, merges = train_bpe(texts, unit=unit, target_vocab_size=size)
+
             save_artifact(
                 dest,
                 vocab=vocab,

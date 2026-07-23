@@ -18,7 +18,12 @@ if str(ROOT) not in sys.path:
 
 from src.bpe_encoder import load_bpe_spec
 from src.load_flores import CONTINENT, LANGUAGES, REFERENCE_LANG, load_flores_sentences
-from src.metrics import attach_token_premiums, metrics_for_language, rows_to_dicts
+from src.metrics import (
+    attach_token_premiums,
+    gini_for_tokenizer,
+    metrics_for_language,
+    rows_to_dicts,
+)
 from src.tokenizers_registry import TokenizerSpec, _tiktoken_surface
 
 DEFAULT_UNITS = ("byte", "grapheme")
@@ -37,6 +42,7 @@ UNIT_DIR = {
     "byte": "byte",
     "grapheme": "grapheme",
     "grapheme_constrained": "gconstr",
+    "parity": "parity",
 }
 
 # Tokenizer id prefix per unit
@@ -44,6 +50,7 @@ UNIT_ID = {
     "byte": "byte",
     "grapheme": "grapheme",
     "grapheme_constrained": "gconstr",
+    "parity": "parity",
 }
 
 
@@ -138,11 +145,12 @@ def macro_means(df: pd.DataFrame, metric: str) -> pd.Series:
 
 def build_ab_summary(
     df: pd.DataFrame,
+    rows,
     *,
     baseline_unit: str,
     compare_unit: str,
 ) -> pd.DataFrame:
-    rows: list[dict] = []
+    rows_out: list[dict] = []
     baseline_key = UNIT_ID[baseline_unit]
     compare_key = UNIT_ID[compare_unit]
     for size in SIZES:
@@ -154,7 +162,7 @@ def build_ab_summary(
             cmp_val = macro_means(df[df["tokenizer_id"] == cmp_id], metric)
             b = float(base_val.get(base_id, float("nan")))
             c = float(cmp_val.get(cmp_id, float("nan")))
-            rows.append(
+            rows_out.append(
                 {
                     "vocab_size": size,
                     "metric": metric,
@@ -164,7 +172,22 @@ def build_ab_summary(
                     "pct_change": ((c - b) / b * 100.0) if b else float("nan"),
                 }
             )
-    return pd.DataFrame(rows)
+        # Gini of tokens-per-line (paper primary fairness metric)
+        b_gini = gini_for_tokenizer(rows, base_id)
+        c_gini = gini_for_tokenizer(rows, cmp_id)
+        rows_out.append(
+            {
+                "vocab_size": size,
+                "metric": "gini",
+                baseline_key: b_gini,
+                compare_key: c_gini,
+                f"delta_{compare_key}_minus_{baseline_key}": c_gini - b_gini,
+                "pct_change": (
+                    ((c_gini - b_gini) / b_gini * 100.0) if b_gini else float("nan")
+                ),
+            }
+        )
+    return pd.DataFrame(rows_out)
 
 
 def build_focus_ab(
@@ -233,13 +256,16 @@ def plot_gap_vs_vocab(
 ) -> None:
     baseline_key = UNIT_ID[baseline_unit]
     compare_key = UNIT_ID[compare_unit]
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
 
     for metric, ax, title in (
         ("token_premium", axes[0], "Token premium (macro mean)"),
         ("stfr", axes[1], "STFR (macro mean)"),
+        ("gini", axes[2], "Gini (tokens/line)"),
     ):
         sub = ab_summary[ab_summary["metric"] == metric].sort_values("vocab_size")
+        if sub.empty:
+            continue
         xs = [s // 1000 for s in sub["vocab_size"]]
         ax.plot(xs, sub[baseline_key], marker="o", label=f"{baseline_key} BPE")
         ax.plot(xs, sub[compare_key], marker="s", label=f"{compare_key} BPE")
@@ -302,7 +328,7 @@ def main(argv: list[str] | None = None) -> int:
     df.to_csv(csv_path, index=False)
 
     ab_summary = build_ab_summary(
-        df, baseline_unit=baseline_unit, compare_unit=compare_unit
+        df, rows, baseline_unit=baseline_unit, compare_unit=compare_unit
     )
     focus_ab = build_focus_ab(
         df, baseline_unit=baseline_unit, compare_unit=compare_unit

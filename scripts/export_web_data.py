@@ -77,6 +77,26 @@ MORPH_SKEW_EXPLANATION = (
     "the fragmentation fix the hypothesis predicted."
 )
 
+PARITY_EXPLANATION = (
+    "Section 4 (Parity-aware BPE) is the OpenAI training-time upgrade candidate "
+    "from Foroutan, Meister et al. (arXiv:2508.04796). Unlike grapheme integrity "
+    "(Sections 1\u20133), which changes seed atoms or merge legality and failed to "
+    "move the metrics, Parity-aware BPE keeps the classical byte seed and o200k "
+    "pretok recipe but changes *which* merge is chosen: at each step it picks the "
+    "currently worst-compressed language on parallel FLORES-dev (fair-max) and "
+    "takes that language's most frequent pair, then applies the merge to all "
+    "languages. Training uses the same English-skewed mix as Section 3 "
+    "(\u224885% English); evaluation is on balanced FLORES-200 devtest. "
+    "It works. Gini of tokens-per-line falls 95% at 8k (0.139\u21920.006), 92% at "
+    "16k, and 85% at 32k. Macro token premium collapses toward 1.0 "
+    "(\u221246% at 8k, \u221239% at 16k, \u221226% at 32k). Fertility, chars/token, STFR, "
+    "and STRR all improve at every vocab size, with the largest gains on starved "
+    "tail scripts (e.g. Odia fertility 5.73\u21922.65 and Amharic 5.05\u21922.93 at 8k). "
+    "Inference is identical to classical BPE \u2014 only the learned merge list "
+    "differs \u2014 so this is directly actionable as a next o200k-class training "
+    "objective, not a frozen-tokenizer wrap."
+)
+
 EXPERIMENT_SECTIONS = [
     {
         "id": "morph",
@@ -138,6 +158,27 @@ EXPERIMENT_SECTIONS = [
             ("bpe_gconstr_16k", "morph-c 16k", "grapheme_constrained", 16000),
             ("bpe_byte_32k", "byte 32k", "byte", 32000),
             ("bpe_gconstr_32k", "morph-c 32k", "grapheme_constrained", 32000),
+            ("o200k", "o200k (ref)", "reference", 200000),
+        ],
+    },
+    {
+        "id": "parity",
+        "title": "Section 4: Parity-aware BPE",
+        "source": "Parity-aware BPE (fair-max) vs classical byte \u00b7 English-skewed train \u00b7 FLORES-dev CR selection \u00b7 eval on balanced FLORES-200 devtest",
+        "metrics_path": ROOT / "artifacts" / "bpe_parity" / "eval_metrics.json",
+        "summary_path": ROOT / "artifacts" / "bpe_parity" / "ab_summary_macro.csv",
+        "plot_src": ROOT / "artifacts" / "bpe_parity" / "gap_vs_vocab_size.png",
+        "plot_web": "gap_vs_vocab_size_parity.png",
+        "compare_col": "parity",
+        "compare_plot_label": "parity-aware BPE",
+        "explanation": PARITY_EXPLANATION,
+        "arms": [
+            ("bpe_byte_8k", "byte 8k", "byte", 8000),
+            ("bpe_parity_8k", "parity 8k", "parity", 8000),
+            ("bpe_byte_16k", "byte 16k", "byte", 16000),
+            ("bpe_parity_16k", "parity 16k", "parity", 16000),
+            ("bpe_byte_32k", "byte 32k", "byte", 32000),
+            ("bpe_parity_32k", "parity 32k", "parity", 32000),
             ("o200k", "o200k (ref)", "reference", 200000),
         ],
     },

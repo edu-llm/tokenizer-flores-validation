@@ -233,5 +233,39 @@ def evaluate_decision_rule(rows: Sequence[LangMetrics]) -> dict:
     }
 
 
+def gini_token_inequality(costs: Sequence[float]) -> float:
+    """Gini coefficient of per-language token costs (Meister / Foroutan et al.).
+
+    costs should be comparable units (e.g. tokens-per-line on a parallel corpus).
+    Values near 0 = equal cost across languages; near 1 = max inequality.
+    """
+    c = sorted(float(x) for x in costs)
+    n = len(c)
+    if n == 0:
+        return float("nan")
+    total = sum(c)
+    if total <= 0:
+        return float("nan")
+    # Eq. 13: (1/n) * (n + 1 - 2 * sum_i (n+1-i) c_i / sum c)
+    weighted = sum((n + 1 - i) * c[i - 1] for i in range(1, n + 1))
+    return (1.0 / n) * (n + 1.0 - 2.0 * weighted / total)
+
+
+def tokens_per_line(row: LangMetrics) -> float:
+    """Parallel-corpus cost proxy: CTC / n_sentences."""
+    if row.n_sentences <= 0:
+        return float("nan")
+    return row.ctc / row.n_sentences
+
+
+def gini_for_tokenizer(rows: Sequence[LangMetrics], tokenizer_id: str) -> float:
+    costs = [
+        tokens_per_line(r)
+        for r in rows
+        if r.tokenizer_id == tokenizer_id and r.n_sentences > 0
+    ]
+    return gini_token_inequality(costs)
+
+
 def rows_to_dicts(rows: Sequence[LangMetrics]) -> List[dict]:
     return [asdict(r) for r in rows]

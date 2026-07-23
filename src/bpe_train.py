@@ -12,7 +12,7 @@ from typing import Literal
 import regex as re
 import tiktoken
 
-Unit = Literal["byte", "grapheme", "grapheme_constrained"]
+Unit = Literal["byte", "grapheme", "grapheme_constrained", "parity"]
 
 # Token = (bytes, left_on_grapheme_boundary, right_on_grapheme_boundary)
 GCToken = tuple[bytes, bool, bool]
@@ -34,7 +34,7 @@ def pretokenize(text: str, pat: re.Pattern[str] | None = None) -> list[str]:
 
 
 def pretoken_atoms(pretok: str, unit: Unit) -> tuple[bytes, ...]:
-    if unit == "byte":
+    if unit in ("byte", "parity"):
         return tuple(bytes([b]) for b in pretok.encode("utf-8"))
     return tuple(g.encode("utf-8") for g in re.findall(r"\X", pretok, flags=re.VERSION1))
 
@@ -110,26 +110,27 @@ def _lang_raw_byte_mass(freqs: Counter) -> float:
     return sum(float(count) * _word_byte_mass(word) for word, count in freqs.items())
 
 
-def build_weighted_word_freqs(
+def build_weighted_lang_freqs(
     by_lang: dict[str, list[str]],
     weights: dict[str, float],
     unit: Unit,
     pat: re.Pattern[str] | None = None,
-) -> Counter:
-    """Build per-language pretoken-atom counters, then reweight by target byte-mass share."""
+) -> dict[str, Counter]:
+    """Build per-language counters reweighted to target byte-mass shares (not collapsed)."""
     if pat is None:
         pat = o200k_pattern()
 
+    atom_unit: Unit = "byte" if unit == "parity" else unit
     per_lang: dict[str, Counter] = {}
     raw_masses: dict[str, float] = {}
 
     for lang, texts in by_lang.items():
         if lang not in weights:
             continue
-        if unit == "grapheme_constrained":
+        if atom_unit == "grapheme_constrained":
             freqs = build_gconstr_word_freqs(texts, pat)
         else:
-            freqs = build_word_freqs(texts, unit, pat)
+            freqs = build_word_freqs(texts, atom_unit, pat)
         per_lang[lang] = freqs
         raw_masses[lang] = _lang_raw_byte_mass(freqs)
 
@@ -137,17 +138,47 @@ def build_weighted_word_freqs(
     if total_raw <= 0:
         raise ValueError("No training mass in weighted corpus")
 
-    combined: Counter = Counter()
+    scaled: dict[str, Counter] = {}
     for lang, freqs in per_lang.items():
         target_share = weights[lang]
         raw_share = raw_masses[lang] / total_raw
         if raw_share <= 0:
             continue
         scale = target_share / raw_share
-        for word, count in freqs.items():
-            combined[word] += count * scale
+        scaled[lang] = Counter({word: count * scale for word, count in freqs.items()})
+    return scaled
 
+
+def build_weighted_word_freqs(
+    by_lang: dict[str, list[str]],
+    weights: dict[str, float],
+    unit: Unit,
+    pat: re.Pattern[str] | None = None,
+) -> Counter:
+    """Build per-language pretoken-atom counters, then reweight by target byte-mass share."""
+    scaled = build_weighted_lang_freqs(by_lang, weights, unit, pat)
+    combined: Counter = Counter()
+    for freqs in scaled.values():
+        combined.update(freqs)
     return combined
+
+
+def build_lang_word_freqs(
+    by_lang: dict[str, list[str]],
+    unit: Unit = "byte",
+    pat: re.Pattern[str] | None = None,
+) -> dict[str, Counter[tuple[bytes, ...]]]:
+    """Unweighted per-language byte/grapheme pretoken counters (for parity CR-dev)."""
+    if pat is None:
+        pat = o200k_pattern()
+    atom_unit: Unit = "byte" if unit == "parity" else unit
+    if atom_unit == "grapheme_constrained":
+        raise ValueError("build_lang_word_freqs does not support grapheme_constrained")
+    return {
+        lang: build_word_freqs(texts, atom_unit, pat)
+        for lang, texts in by_lang.items()
+        if texts
+    }
 
 
 def initial_vocab(word_freqs: Counter[tuple[bytes, ...]], unit: Unit) -> dict[bytes, int]:
@@ -341,7 +372,9 @@ def train_bpe_from_freqs(
         return vocab, merges
 
     std_freqs: Counter[tuple[bytes, ...]] = word_freqs  # type: ignore[assignment]
-    std_unit: Literal["byte", "grapheme"] = unit  # type: ignore[assignment]
+    std_unit: Literal["byte", "grapheme"] = (
+        "byte" if unit == "parity" else unit  # type: ignore[assignment]
+    )
     vocab = initial_vocab(std_freqs, std_unit)
     merges = []
 
@@ -382,6 +415,130 @@ def train_bpe_from_freqs(
     return vocab, merges
 
 
+def _corpus_token_count(freqs: Counter[tuple[bytes, ...]]) -> float:
+    """Total tokens under the current segmented word frequencies."""
+    return sum(float(freq) * len(word) for word, freq in freqs.items())
+
+
+def _apply_merge_to_lang_state(
+    freqs: Counter[tuple[bytes, ...]],
+    pair_counts: Counter[tuple[bytes, bytes]],
+    pair_index: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]],
+    pair: tuple[bytes, bytes],
+    merged: bytes,
+) -> None:
+    """Apply one merge to a single language's freq / pair-index state in place."""
+    affected = list(pair_index.get(pair, ()))
+    for word in affected:
+        if word not in freqs:
+            continue
+        freq = freqs.pop(word)
+        _remove_word(word, freq, pair_counts, pair_index)
+        new_word = merge_pair_in_word(word, pair, merged)
+
+        if new_word in freqs:
+            existing = freqs.pop(new_word)
+            _remove_word(new_word, existing, pair_counts, pair_index)
+            freq += existing
+
+        freqs[new_word] = freq
+        _add_word(new_word, freq, pair_counts, pair_index)
+
+
+def train_parity_bpe_from_lang_freqs(
+    train_by_lang: dict[str, Counter[tuple[bytes, ...]]],
+    dev_by_lang: dict[str, Counter[tuple[bytes, ...]]],
+    *,
+    target_vocab_size: int,
+) -> tuple[dict[bytes, int], list[tuple[bytes, bytes]]]:
+    """Parity-aware BPE (Foroutan/Meister et al.): fair-max merge selection.
+
+    At each step pick the worst-compressed language on the parallel *dev* corpus
+    (max tokens under line-normalized CR), then take the max-frequency pair from
+    that language's *train* counts, and apply the merge to every language.
+    """
+    train_freqs = {lang: Counter(freqs) for lang, freqs in train_by_lang.items()}
+    dev_freqs = {lang: Counter(freqs) for lang, freqs in dev_by_lang.items()}
+    langs = sorted(set(train_freqs) & set(dev_freqs))
+    if not langs:
+        raise ValueError("train_by_lang and dev_by_lang share no languages")
+
+    seed_freqs: Counter[tuple[bytes, ...]] = Counter()
+    for freqs in train_freqs.values():
+        for word in freqs:
+            seed_freqs[word] += 1
+    vocab = initial_vocab(seed_freqs, "byte")
+    merges: list[tuple[bytes, bytes]] = []
+
+    train_pair_counts: dict[str, Counter[tuple[bytes, bytes]]] = {}
+    train_pair_index: dict[str, dict[tuple[bytes, bytes], set[tuple[bytes, ...]]]] = {}
+    for lang in langs:
+        pc: Counter[tuple[bytes, bytes]] = Counter()
+        pi: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]] = {}
+        for word, freq in train_freqs[lang].items():
+            _add_word(word, freq, pc, pi)
+        train_pair_counts[lang] = pc
+        train_pair_index[lang] = pi
+
+    # Dev only needs freqs for CR; keep pair index so merges stay consistent.
+    dev_pair_counts: dict[str, Counter[tuple[bytes, bytes]]] = {}
+    dev_pair_index: dict[str, dict[tuple[bytes, bytes], set[tuple[bytes, ...]]]] = {}
+    for lang in langs:
+        pc = Counter()
+        pi: dict[tuple[bytes, bytes], set[tuple[bytes, ...]]] = {}
+        for word, freq in dev_freqs[lang].items():
+            _add_word(word, freq, pc, pi)
+        dev_pair_counts[lang] = pc
+        dev_pair_index[lang] = pi
+
+    while len(vocab) < target_vocab_size:
+        # Parallel FLORES: minimizing CR ≡ maximizing tokens (same #lines).
+        worst = max(langs, key=lambda L: _corpus_token_count(dev_freqs[L]))
+        pair = best_pair(train_pair_counts[worst])
+        if pair is None:
+            # Fall back: try any language that still has pairs.
+            pair = None
+            for lang in sorted(
+                langs, key=lambda L: _corpus_token_count(dev_freqs[L]), reverse=True
+            ):
+                pair = best_pair(train_pair_counts[lang])
+                if pair is not None:
+                    break
+            if pair is None:
+                break
+
+        left, right = pair
+        merged = left + right
+        if merged in vocab:
+            for lang in langs:
+                if pair in train_pair_counts[lang]:
+                    train_pair_counts[lang][pair] = 0
+                if pair in dev_pair_counts[lang]:
+                    dev_pair_counts[lang][pair] = 0
+            continue
+
+        vocab[merged] = len(vocab)
+        merges.append(pair)
+
+        for lang in langs:
+            _apply_merge_to_lang_state(
+                train_freqs[lang],
+                train_pair_counts[lang],
+                train_pair_index[lang],
+                pair,
+                merged,
+            )
+            _apply_merge_to_lang_state(
+                dev_freqs[lang],
+                dev_pair_counts[lang],
+                dev_pair_index[lang],
+                pair,
+                merged,
+            )
+
+    return vocab, merges
+
+
 def train_bpe(
     texts: list[str],
     *,
@@ -394,6 +551,11 @@ def train_bpe(
         pat = o200k_pattern()
     if unit == "grapheme_constrained":
         word_freqs = build_gconstr_word_freqs(texts, pat)
+    elif unit == "parity":
+        raise ValueError(
+            "parity unit requires train_parity_bpe_from_lang_freqs "
+            "(per-language train + parallel CR-dev)"
+        )
     else:
         word_freqs = build_word_freqs(texts, unit, pat)
     return train_bpe_from_freqs(
