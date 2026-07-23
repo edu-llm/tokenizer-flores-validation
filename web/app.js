@@ -16,12 +16,9 @@
   const prodHeatmap = document.getElementById("heatmap");
   const prodHeatmapTitle = document.getElementById("heatmap-title");
 
-  const expExplanation = document.getElementById("experiment-explanation");
-  const expPlot = document.getElementById("experiment-plot");
-  const expSelect = document.getElementById("experiment-metric-select");
-  const expMetricExplanation = document.getElementById("experiment-metric-explanation");
-  const expHeatmap = document.getElementById("experiment-heatmap");
-  const expHeatmapTitle = document.getElementById("experiment-heatmap-title");
+  const expSectionsContainer = document.getElementById("experiment-sections");
+  const experiments =
+    data.experiments || (data.experiment ? [data.experiment] : []);
 
   caption.textContent =
     data.source +
@@ -45,25 +42,10 @@
   }
 
   fillMetricSelect(prodSelect);
-  if (data.experiment) {
-    fillMetricSelect(expSelect);
-    expExplanation.textContent = data.experiment.explanation;
-    if (data.experiment.plot) {
-      expPlot.src = data.experiment.plot;
-    }
-  }
 
   const prodLookup = new Map();
   for (const row of data.rows) {
     prodLookup.set(row.tokenizer_id + "|" + row.language, row);
-  }
-
-  let expLookup = null;
-  if (data.experiment) {
-    expLookup = new Map();
-    for (const row of data.experiment.rows) {
-      expLookup.set(row.tokenizer_id + "|" + row.language, row);
-    }
   }
 
   function getProdValue(metricId, tokId, langCode) {
@@ -73,12 +55,17 @@
     return v === null || v === undefined ? null : v;
   }
 
-  function getExpValue(metricId, armId, langCode) {
-    if (!expLookup) return null;
-    const row = expLookup.get(armId + "|" + langCode);
-    if (!row) return null;
-    const v = row[metricId];
-    return v === null || v === undefined ? null : v;
+  function makeGetValue(rows) {
+    const lookup = new Map();
+    for (const row of rows) {
+      lookup.set(row.tokenizer_id + "|" + row.language, row);
+    }
+    return function (metricId, armId, langCode) {
+      const row = lookup.get(armId + "|" + langCode);
+      if (!row) return null;
+      const v = row[metricId];
+      return v === null || v === undefined ? null : v;
+    };
   }
 
   function formatValue(v) {
@@ -201,18 +188,85 @@
     );
   }
 
-  function renderExperiment() {
-    if (!data.experiment) return;
-    const metric = data.metrics.find((m) => m.id === expSelect.value);
-    expMetricExplanation.textContent = metric.explanation;
-    renderHeatmap(
-      expHeatmap,
-      expHeatmapTitle,
-      metric,
-      data.experiment.languages,
-      data.experiment.arms,
-      getExpValue
-    );
+  function buildExperimentSections() {
+    if (!expSectionsContainer) return;
+    expSectionsContainer.innerHTML = "";
+
+    for (const exp of experiments) {
+      const section = document.createElement("section");
+      section.className = "experiment-section";
+
+      const title = document.createElement("h2");
+      title.className = "experiment-title";
+      title.textContent = exp.title || exp.source;
+      section.appendChild(title);
+
+      if (exp.source && exp.title) {
+        const sub = document.createElement("p");
+        sub.className = "caption";
+        sub.textContent = exp.source;
+        section.appendChild(sub);
+      }
+
+      const explanation = document.createElement("p");
+      explanation.className = "experiment-explanation";
+      explanation.textContent = exp.explanation;
+      section.appendChild(explanation);
+
+      if (exp.plot) {
+        const img = document.createElement("img");
+        img.className = "experiment-plot";
+        img.src = exp.plot;
+        img.alt = (exp.title || "experiment") + " — gap vs vocab size";
+        section.appendChild(img);
+      }
+
+      const controls = document.createElement("div");
+      controls.className = "controls";
+      const label = document.createElement("label");
+      label.textContent = "Score";
+      const select = document.createElement("select");
+      fillMetricSelect(select);
+      const metricExplanation = document.createElement("aside");
+      metricExplanation.className = "explanation";
+      metricExplanation.setAttribute("aria-live", "polite");
+      controls.appendChild(label);
+      controls.appendChild(select);
+      controls.appendChild(metricExplanation);
+      section.appendChild(controls);
+
+      const panel = document.createElement("section");
+      panel.className = "panel heatmap-panel";
+      const heatTitle = document.createElement("h3");
+      const heatmapDiv = document.createElement("div");
+      heatmapDiv.className = "heatmap";
+      const legend = document.createElement("p");
+      legend.className = "legend-note";
+      legend.textContent =
+        "Color scales by severity within this metric. Redder = worse for the selected score.";
+      panel.appendChild(heatTitle);
+      panel.appendChild(heatmapDiv);
+      panel.appendChild(legend);
+      section.appendChild(panel);
+
+      expSectionsContainer.appendChild(section);
+
+      const getValue = makeGetValue(exp.rows);
+      function renderThisSection() {
+        const metric = data.metrics.find((m) => m.id === select.value);
+        metricExplanation.textContent = metric.explanation;
+        renderHeatmap(
+          heatmapDiv,
+          heatTitle,
+          metric,
+          exp.languages,
+          exp.arms,
+          getValue
+        );
+      }
+      select.addEventListener("change", renderThisSection);
+      renderThisSection();
+    }
   }
 
   function activateTab(name) {
@@ -230,19 +284,15 @@
 
     if (isProduction) {
       renderProduction();
-    } else {
-      renderExperiment();
     }
   }
 
   prodSelect.addEventListener("change", renderProduction);
-  if (data.experiment) {
-    expSelect.addEventListener("change", renderExperiment);
-  }
 
   tabs.forEach((btn) => {
     btn.addEventListener("click", () => activateTab(btn.dataset.tab));
   });
 
+  buildExperimentSections();
   activateTab("production");
 })();

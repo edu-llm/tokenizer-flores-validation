@@ -52,29 +52,7 @@
     </section>
 
     <section id="tab-experiment" class="tab-panel" role="tabpanel" hidden>
-      <section class="experiment-intro">
-        <p id="experiment-explanation" class="experiment-explanation"></p>
-        <img
-          id="experiment-plot"
-          class="experiment-plot"
-          src="gap_vs_vocab_size.png"
-          alt="Baseline vs grapheme gap vs vocab size"
-        />
-      </section>
-
-      <section class="controls">
-        <label for="experiment-metric-select">Score</label>
-        <select id="experiment-metric-select"></select>
-        <aside id="experiment-metric-explanation" class="explanation" aria-live="polite"></aside>
-      </section>
-
-      <section class="panel heatmap-panel">
-        <h2 id="experiment-heatmap-title">Heatmap (worse → redder)</h2>
-        <div id="experiment-heatmap" class="heatmap"></div>
-        <p class="legend-note">
-          Color scales by severity within this metric. Redder = worse for the selected score.
-        </p>
-      </section>
+      <div id="experiment-sections"></div>
     </section>
 
     <script src="data.js"></script>

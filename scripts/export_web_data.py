@@ -11,10 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 METRICS_PATH = ROOT / "results" / "metrics.json"
 LANGS_PATH = ROOT / "artifacts" / "languages.json"
 OUT_PATH = ROOT / "web" / "data.js"
-EXPERIMENT_METRICS_PATH = ROOT / "artifacts" / "bpe" / "eval_metrics.json"
-EXPERIMENT_SUMMARY_PATH = ROOT / "artifacts" / "bpe" / "ab_summary_macro.csv"
-EXPERIMENT_PLOT_SRC = ROOT / "artifacts" / "bpe" / "gap_vs_vocab_size.png"
-EXPERIMENT_PLOT_DST = ROOT / "web" / "gap_vs_vocab_size.png"
+WEB_DIR = ROOT / "web"
 
 TOKENIZER_ORDER = [
     "o200k",
@@ -37,27 +34,74 @@ TOKENIZER_LABELS = {
     "superbpe": "SuperBPE t180k",
 }
 
-EXPERIMENT_ARM_ORDER = [
-    ("bpe_byte_8k", "byte 8k", "byte", 8000),
-    ("bpe_grapheme_8k", "graph 8k", "grapheme", 8000),
-    ("bpe_byte_16k", "byte 16k", "byte", 16000),
-    ("bpe_grapheme_16k", "graph 16k", "grapheme", 16000),
-    ("bpe_byte_32k", "byte 32k", "byte", 32000),
-    ("bpe_grapheme_32k", "graph 32k", "grapheme", 32000),
-    ("o200k", "o200k (ref)", "reference", 200000),
-]
-
-EXPERIMENT_EXPLANATION = (
-    "This from-scratch A/B tested whether making grapheme clusters atomic improves "
-    "multilingual tokenization at matched vocab size. It did not. Seeding the "
-    "vocabulary with every grapheme cluster consumes the vocab budget: at 8k, the "
-    "grapheme arm learns only 4,165 merges versus 7,744 for the byte baseline. "
-    "With fewer learned multi-character merges, single-character fragmentation "
-    "rises (STFR up) and single-token word retention falls (STRR down). Fertility "
-    "and token premium improve slightly, and all gaps shrink as vocab grows to 32k, "
-    "where the seed overhead amortizes. Conclusion: grapheme-as-atom trades vocab "
-    "budget and is not a net win at matched size."
+MORPH_EXPLANATION = (
+    "Section 1 (Morph) is a from-scratch A/B testing whether making grapheme "
+    "clusters atomic improves multilingual tokenization at matched vocab size. "
+    "It did not. Seeding the vocabulary with every grapheme cluster consumes the "
+    "vocab budget: at 8k, the morph arm learns only 4,165 merges versus 7,744 for "
+    "the byte baseline. With fewer learned multi-character merges, single-character "
+    "fragmentation rises (STFR up) and single-token word retention falls (STRR "
+    "down). Fertility and token premium improve slightly, and all gaps shrink as "
+    "vocab grows to 32k, where the seed overhead amortizes. Conclusion: "
+    "grapheme-as-atom trades vocab budget and is not a net win at matched size."
 )
+
+MORPH_CONSTRAINED_EXPLANATION = (
+    "Section 2 (Morph constrained) fixes the vocab-budget problem: it keeps the "
+    "byte baseline's 256-byte seed (so the morph-constrained arm learns the same "
+    "7,744 merges at 8k as byte) but forbids any merge from splitting a grapheme "
+    "cluster. This isolates the grapheme-integrity constraint from the seed tax. "
+    "It still does not beat byte on the fragmentation metrics: STFR is slightly "
+    "worse at every vocab size, and STRR is marginally better only at 8k (worse at "
+    "16k/32k). Constraining merge choices preserves the budget but nudges more "
+    "single-character tokens. Conclusion: grapheme integrity, by either mechanism, "
+    "is not a net win for these metrics at this scale."
+)
+
+EXPERIMENT_SECTIONS = [
+    {
+        "id": "morph",
+        "title": "Section 1: Morph",
+        "source": "Morph (grapheme-as-atom) A/B \u00b7 FLORES-200 devtest \u00b7 12 languages \u00b7 matched vocab",
+        "metrics_path": ROOT / "artifacts" / "bpe" / "eval_metrics.json",
+        "summary_path": ROOT / "artifacts" / "bpe" / "ab_summary_macro.csv",
+        "plot_src": ROOT / "artifacts" / "bpe" / "gap_vs_vocab_size.png",
+        "plot_web": "gap_vs_vocab_size.png",
+        "compare_col": "grapheme",
+        "compare_plot_label": "morph BPE",
+        "explanation": MORPH_EXPLANATION,
+        "arms": [
+            ("bpe_byte_8k", "byte 8k", "byte", 8000),
+            ("bpe_grapheme_8k", "morph 8k", "grapheme", 8000),
+            ("bpe_byte_16k", "byte 16k", "byte", 16000),
+            ("bpe_grapheme_16k", "morph 16k", "grapheme", 16000),
+            ("bpe_byte_32k", "byte 32k", "byte", 32000),
+            ("bpe_grapheme_32k", "morph 32k", "grapheme", 32000),
+            ("o200k", "o200k (ref)", "reference", 200000),
+        ],
+    },
+    {
+        "id": "morph_constrained",
+        "title": "Section 2: Morph constrained",
+        "source": "Morph-constrained (byte seed, no grapheme splits) A/B \u00b7 FLORES-200 devtest \u00b7 12 languages",
+        "metrics_path": ROOT / "artifacts" / "bpe_constrained" / "eval_metrics.json",
+        "summary_path": ROOT / "artifacts" / "bpe_constrained" / "ab_summary_macro.csv",
+        "plot_src": ROOT / "artifacts" / "bpe_constrained" / "gap_vs_vocab_size.png",
+        "plot_web": "gap_vs_vocab_size_constrained.png",
+        "compare_col": "gconstr",
+        "compare_plot_label": "morph-constrained BPE",
+        "explanation": MORPH_CONSTRAINED_EXPLANATION,
+        "arms": [
+            ("bpe_byte_8k", "byte 8k", "byte", 8000),
+            ("bpe_gconstr_8k", "morph-c 8k", "grapheme_constrained", 8000),
+            ("bpe_byte_16k", "byte 16k", "byte", 16000),
+            ("bpe_gconstr_16k", "morph-c 16k", "grapheme_constrained", 16000),
+            ("bpe_byte_32k", "byte 32k", "byte", 32000),
+            ("bpe_gconstr_32k", "morph-c 32k", "grapheme_constrained", 32000),
+            ("o200k", "o200k (ref)", "reference", 200000),
+        ],
+    },
+]
 
 METRIC_META = [
     {
@@ -121,7 +165,8 @@ METRIC_META = [
 ]
 
 
-def load_macro_deltas(path: Path) -> list[dict]:
+def load_macro_deltas(path: Path, compare_col: str) -> list[dict]:
+    delta_col = f"delta_{compare_col}_minus_byte"
     rows: list[dict] = []
     with path.open(newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
@@ -131,15 +176,17 @@ def load_macro_deltas(path: Path) -> list[dict]:
                     "vocab_size": int(row["vocab_size"]),
                     "metric": row["metric"],
                     "byte": float(row["byte"]),
-                    "grapheme": float(row["grapheme"]),
-                    "delta_grapheme_minus_byte": float(row["delta_grapheme_minus_byte"]),
+                    "compare": float(row[compare_col]),
+                    "delta_compare_minus_byte": float(row[delta_col]),
                     "pct_change": float(row["pct_change"]),
                 }
             )
     return rows
 
 
-def plot_gap_vs_vocab(macro_deltas: list[dict], out_path: Path) -> None:
+def plot_gap_vs_vocab(
+    macro_deltas: list[dict], out_path: Path, compare_label: str
+) -> None:
     import matplotlib.pyplot as plt
 
     by_metric: dict[str, list[dict]] = {}
@@ -156,7 +203,7 @@ def plot_gap_vs_vocab(macro_deltas: list[dict], out_path: Path) -> None:
         sub = by_metric[metric]
         xs = [r["vocab_size"] // 1000 for r in sub]
         ax.plot(xs, [r["byte"] for r in sub], marker="o", label="byte BPE")
-        ax.plot(xs, [r["grapheme"] for r in sub], marker="s", label="grapheme BPE")
+        ax.plot(xs, [r["compare"] for r in sub], marker="s", label=compare_label)
         ax.set_xlabel("Vocab size (thousands)")
         ax.set_ylabel(metric)
         ax.set_title(title)
@@ -164,32 +211,40 @@ def plot_gap_vs_vocab(macro_deltas: list[dict], out_path: Path) -> None:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-    fig.suptitle("Baseline vs grapheme gap vs vocab size (FLORES devtest)")
+    fig.suptitle(f"byte vs {compare_label} gap vs vocab size (FLORES devtest)")
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=160)
     plt.close(fig)
 
 
-def copy_experiment_plot(macro_deltas: list[dict]) -> None:
-    if EXPERIMENT_PLOT_SRC.is_file():
-        shutil.copy(EXPERIMENT_PLOT_SRC, EXPERIMENT_PLOT_DST)
+def resolve_experiment_plot(
+    section: dict, macro_deltas: list[dict]
+) -> None:
+    dst = WEB_DIR / section["plot_web"]
+    src = section["plot_src"]
+    if src.is_file():
+        shutil.copy(src, dst)
         return
-    plot_gap_vs_vocab(macro_deltas, EXPERIMENT_PLOT_DST)
+    plot_gap_vs_vocab(macro_deltas, dst, section["compare_plot_label"])
 
 
-def build_experiment(lang_meta: dict[str, dict], language_order: list[str]) -> dict | None:
-    if not EXPERIMENT_METRICS_PATH.is_file() or not EXPERIMENT_SUMMARY_PATH.is_file():
+def build_experiment(
+    section: dict, lang_meta: dict[str, dict], language_order: list[str]
+) -> dict | None:
+    metrics_path: Path = section["metrics_path"]
+    summary_path: Path = section["summary_path"]
+    if not metrics_path.is_file() or not summary_path.is_file():
         return None
 
-    exp_rows = json.loads(EXPERIMENT_METRICS_PATH.read_text(encoding="utf-8"))
-    arm_ids = {arm_id for arm_id, *_ in EXPERIMENT_ARM_ORDER}
+    exp_rows = json.loads(metrics_path.read_text(encoding="utf-8"))
+    arm_ids = {arm_id for arm_id, *_ in section["arms"]}
     exp_rows = [r for r in exp_rows if r["tokenizer_id"] in arm_ids]
     if not exp_rows:
         return None
 
-    macro_deltas = load_macro_deltas(EXPERIMENT_SUMMARY_PATH)
-    copy_experiment_plot(macro_deltas)
+    macro_deltas = load_macro_deltas(summary_path, section["compare_col"])
+    resolve_experiment_plot(section, macro_deltas)
 
     exp_lang_codes = sorted(
         {r["language"] for r in exp_rows},
@@ -212,15 +267,17 @@ def build_experiment(lang_meta: dict[str, dict], language_order: list[str]) -> d
             "unit": unit,
             "vocab_size": vocab_size,
         }
-        for arm_id, label, unit, vocab_size in EXPERIMENT_ARM_ORDER
+        for arm_id, label, unit, vocab_size in section["arms"]
         if any(r["tokenizer_id"] == arm_id for r in exp_rows)
     ]
 
     return {
-        "source": "Grapheme A/B · FLORES-200 devtest · 12 languages · matched vocab sizes",
+        "id": section["id"],
+        "title": section["title"],
+        "source": section["source"],
         "n_sentences": exp_rows[0]["n_sentences"] if exp_rows else 0,
-        "explanation": EXPERIMENT_EXPLANATION,
-        "plot": "gap_vs_vocab_size.png",
+        "explanation": section["explanation"],
+        "plot": section["plot_web"],
         "arms": arms,
         "languages": languages,
         "rows": exp_rows,
@@ -259,9 +316,13 @@ def main() -> None:
         "rows": rows,
     }
 
-    experiment = build_experiment(lang_meta, language_order)
-    if experiment:
-        payload["experiment"] = experiment
+    experiments = []
+    for section in EXPERIMENT_SECTIONS:
+        exp = build_experiment(section, lang_meta, language_order)
+        if exp:
+            experiments.append(exp)
+    if experiments:
+        payload["experiments"] = experiments
 
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(
@@ -270,10 +331,12 @@ def main() -> None:
         + ";\n",
         encoding="utf-8",
     )
-    exp_note = f", experiment={len(experiment['rows'])} rows" if experiment else ""
+    exp_note = (
+        ", experiments=" + ", ".join(f"{e['id']}({len(e['rows'])})" for e in experiments)
+        if experiments
+        else ""
+    )
     print(f"Wrote {OUT_PATH} ({len(rows)} rows, {len(languages)} langs{exp_note})")
-    if EXPERIMENT_PLOT_DST.is_file():
-        print(f"Wrote {EXPERIMENT_PLOT_DST}")
 
 
 if __name__ == "__main__":
