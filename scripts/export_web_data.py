@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import csv
 import json
+import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 METRICS_PATH = ROOT / "results" / "metrics.json"
 LANGS_PATH = ROOT / "artifacts" / "languages.json"
 OUT_PATH = ROOT / "web" / "data.js"
+EXPERIMENT_METRICS_PATH = ROOT / "artifacts" / "bpe" / "eval_metrics.json"
+EXPERIMENT_SUMMARY_PATH = ROOT / "artifacts" / "bpe" / "ab_summary_macro.csv"
+EXPERIMENT_PLOT_SRC = ROOT / "artifacts" / "bpe" / "gap_vs_vocab_size.png"
+EXPERIMENT_PLOT_DST = ROOT / "web" / "gap_vs_vocab_size.png"
 
 TOKENIZER_ORDER = [
     "o200k",
@@ -30,6 +36,28 @@ TOKENIZER_LABELS = {
     "wordpiece": "mBERT (WordPiece)",
     "superbpe": "SuperBPE t180k",
 }
+
+EXPERIMENT_ARM_ORDER = [
+    ("bpe_byte_8k", "byte 8k", "byte", 8000),
+    ("bpe_grapheme_8k", "graph 8k", "grapheme", 8000),
+    ("bpe_byte_16k", "byte 16k", "byte", 16000),
+    ("bpe_grapheme_16k", "graph 16k", "grapheme", 16000),
+    ("bpe_byte_32k", "byte 32k", "byte", 32000),
+    ("bpe_grapheme_32k", "graph 32k", "grapheme", 32000),
+    ("o200k", "o200k (ref)", "reference", 200000),
+]
+
+EXPERIMENT_EXPLANATION = (
+    "This from-scratch A/B tested whether making grapheme clusters atomic improves "
+    "multilingual tokenization at matched vocab size. It did not. Seeding the "
+    "vocabulary with every grapheme cluster consumes the vocab budget: at 8k, the "
+    "grapheme arm learns only 4,165 merges versus 7,744 for the byte baseline. "
+    "With fewer learned multi-character merges, single-character fragmentation "
+    "rises (STFR up) and single-token word retention falls (STRR down). Fertility "
+    "and token premium improve slightly, and all gaps shrink as vocab grows to 32k, "
+    "where the seed overhead amortizes. Conclusion: grapheme-as-atom trades vocab "
+    "budget and is not a net win at matched size."
+)
 
 METRIC_META = [
     {
@@ -93,12 +121,118 @@ METRIC_META = [
 ]
 
 
+def load_macro_deltas(path: Path) -> list[dict]:
+    rows: list[dict] = []
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            rows.append(
+                {
+                    "vocab_size": int(row["vocab_size"]),
+                    "metric": row["metric"],
+                    "byte": float(row["byte"]),
+                    "grapheme": float(row["grapheme"]),
+                    "delta_grapheme_minus_byte": float(row["delta_grapheme_minus_byte"]),
+                    "pct_change": float(row["pct_change"]),
+                }
+            )
+    return rows
+
+
+def plot_gap_vs_vocab(macro_deltas: list[dict], out_path: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    by_metric: dict[str, list[dict]] = {}
+    for row in macro_deltas:
+        by_metric.setdefault(row["metric"], []).append(row)
+    for metric_rows in by_metric.values():
+        metric_rows.sort(key=lambda r: r["vocab_size"])
+
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    for metric, ax, title in (
+        ("token_premium", axes[0], "Token premium (macro mean)"),
+        ("stfr", axes[1], "STFR (macro mean)"),
+    ):
+        sub = by_metric[metric]
+        xs = [r["vocab_size"] // 1000 for r in sub]
+        ax.plot(xs, [r["byte"] for r in sub], marker="o", label="byte BPE")
+        ax.plot(xs, [r["grapheme"] for r in sub], marker="s", label="grapheme BPE")
+        ax.set_xlabel("Vocab size (thousands)")
+        ax.set_ylabel(metric)
+        ax.set_title(title)
+        ax.set_xticks(xs)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+    fig.suptitle("Baseline vs grapheme gap vs vocab size (FLORES devtest)")
+    fig.tight_layout()
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160)
+    plt.close(fig)
+
+
+def copy_experiment_plot(macro_deltas: list[dict]) -> None:
+    if EXPERIMENT_PLOT_SRC.is_file():
+        shutil.copy(EXPERIMENT_PLOT_SRC, EXPERIMENT_PLOT_DST)
+        return
+    plot_gap_vs_vocab(macro_deltas, EXPERIMENT_PLOT_DST)
+
+
+def build_experiment(lang_meta: dict[str, dict], language_order: list[str]) -> dict | None:
+    if not EXPERIMENT_METRICS_PATH.is_file() or not EXPERIMENT_SUMMARY_PATH.is_file():
+        return None
+
+    exp_rows = json.loads(EXPERIMENT_METRICS_PATH.read_text(encoding="utf-8"))
+    arm_ids = {arm_id for arm_id, *_ in EXPERIMENT_ARM_ORDER}
+    exp_rows = [r for r in exp_rows if r["tokenizer_id"] in arm_ids]
+    if not exp_rows:
+        return None
+
+    macro_deltas = load_macro_deltas(EXPERIMENT_SUMMARY_PATH)
+    copy_experiment_plot(macro_deltas)
+
+    exp_lang_codes = sorted(
+        {r["language"] for r in exp_rows},
+        key=lambda code: language_order.index(code) if code in language_order else 999,
+    )
+    languages = [
+        {
+            "code": code,
+            "name": lang_meta[code]["name"],
+            "continent": lang_meta[code]["continent"],
+        }
+        for code in exp_lang_codes
+        if code in lang_meta
+    ]
+
+    arms = [
+        {
+            "id": arm_id,
+            "label": label,
+            "unit": unit,
+            "vocab_size": vocab_size,
+        }
+        for arm_id, label, unit, vocab_size in EXPERIMENT_ARM_ORDER
+        if any(r["tokenizer_id"] == arm_id for r in exp_rows)
+    ]
+
+    return {
+        "source": "Grapheme A/B · FLORES-200 devtest · 12 languages · matched vocab sizes",
+        "n_sentences": exp_rows[0]["n_sentences"] if exp_rows else 0,
+        "explanation": EXPERIMENT_EXPLANATION,
+        "plot": "gap_vs_vocab_size.png",
+        "arms": arms,
+        "languages": languages,
+        "rows": exp_rows,
+        "macro_deltas": macro_deltas,
+    }
+
+
 def main() -> None:
     rows = json.loads(METRICS_PATH.read_text(encoding="utf-8"))
     langs_doc = json.loads(LANGS_PATH.read_text(encoding="utf-8"))
     lang_meta = {L["code"]: L for L in langs_doc["languages"]}
 
-    # Stable language order from artifacts
     language_order = [L["code"] for L in langs_doc["languages"]]
     languages = [
         {
@@ -116,7 +250,7 @@ def main() -> None:
         if any(r["tokenizer_id"] == tid for r in rows)
     ]
 
-    payload = {
+    payload: dict = {
         "source": "FLORES-200 devtest · NFKC · specials excluded",
         "n_sentences": rows[0]["n_sentences"] if rows else 0,
         "metrics": METRIC_META,
@@ -125,6 +259,10 @@ def main() -> None:
         "rows": rows,
     }
 
+    experiment = build_experiment(lang_meta, language_order)
+    if experiment:
+        payload["experiment"] = experiment
+
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     OUT_PATH.write_text(
         "window.METRICS_DATA = "
@@ -132,7 +270,10 @@ def main() -> None:
         + ";\n",
         encoding="utf-8",
     )
-    print(f"Wrote {OUT_PATH} ({len(rows)} rows, {len(languages)} langs)")
+    exp_note = f", experiment={len(experiment['rows'])} rows" if experiment else ""
+    print(f"Wrote {OUT_PATH} ({len(rows)} rows, {len(languages)} langs{exp_note})")
+    if EXPERIMENT_PLOT_DST.is_file():
+        print(f"Wrote {EXPERIMENT_PLOT_DST}")
 
 
 if __name__ == "__main__":

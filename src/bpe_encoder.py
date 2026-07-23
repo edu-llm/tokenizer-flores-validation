@@ -10,7 +10,7 @@ import regex as re
 from .bpe_train import load_artifact, o200k_pattern, pretokenize
 from .tokenizers_registry import TokenizerSpec
 
-Unit = Literal["byte", "grapheme"]
+Unit = Literal["byte", "grapheme", "grapheme_constrained"]
 
 
 class BPEEncoder:
@@ -32,7 +32,7 @@ class BPEEncoder:
         return cls(vocab, merges, unit)
 
     def _initial_symbols(self, pretok: str) -> list[bytes]:
-        if self.unit == "byte":
+        if self.unit in ("byte", "grapheme_constrained"):
             return [bytes([b]) for b in pretok.encode("utf-8")]
         symbols: list[bytes] = []
         for grapheme in re.findall(r"\X", pretok, flags=re.VERSION1):

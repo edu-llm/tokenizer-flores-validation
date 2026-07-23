@@ -21,7 +21,7 @@ from src.load_flores import CONTINENT, LANGUAGES, REFERENCE_LANG, load_flores_se
 from src.metrics import attach_token_premiums, metrics_for_language, rows_to_dicts
 from src.tokenizers_registry import TokenizerSpec, _tiktoken_surface
 
-UNITS = ("byte", "grapheme")
+DEFAULT_UNITS = ("byte", "grapheme")
 SIZES = (8000, 16000, 32000)
 FOCUS_LANGS = (
     "ory_Orya",
@@ -32,6 +32,20 @@ FOCUS_LANGS = (
     "grn_Latn",
 )
 
+# Subdirectory naming per unit (grapheme_constrained -> gconstr)
+UNIT_DIR = {
+    "byte": "byte",
+    "grapheme": "grapheme",
+    "grapheme_constrained": "gconstr",
+}
+
+# Tokenizer id prefix per unit
+UNIT_ID = {
+    "byte": "byte",
+    "grapheme": "grapheme",
+    "grapheme_constrained": "gconstr",
+}
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
@@ -40,6 +54,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path("artifacts/bpe"),
         help="Directory containing trained tokenizer subfolders",
+    )
+    p.add_argument(
+        "--baseline-dir",
+        type=Path,
+        default=None,
+        help="Optional separate directory for baseline arm artifacts",
+    )
+    p.add_argument(
+        "--baseline-unit",
+        default="byte",
+        choices=tuple(UNIT_DIR.keys()),
+        help="Baseline arm unit name (default: byte)",
+    )
+    p.add_argument(
+        "--compare-unit",
+        default="grapheme",
+        choices=tuple(UNIT_DIR.keys()),
+        help="Comparison arm unit name (default: grapheme)",
     )
     p.add_argument(
         "--out-dir",
@@ -60,17 +92,28 @@ def size_label(size: int) -> str:
     return f"{size // 1000}k"
 
 
-def load_sweep_specs(artifact_dir: Path) -> dict[str, TokenizerSpec]:
+def tokenizer_id(unit: str, size: int) -> str:
+    return f"bpe_{UNIT_ID[unit]}_{size_label(size)}"
+
+
+def artifact_subdir(unit: str, size: int) -> str:
+    return f"{UNIT_DIR[unit]}_{size_label(size)}"
+
+
+def load_arm_specs(
+    artifact_dir: Path,
+    unit: str,
+) -> dict[str, TokenizerSpec]:
     specs: dict[str, TokenizerSpec] = {}
-    for unit in UNITS:
-        for size in SIZES:
-            tid = f"bpe_{unit}_{size_label(size)}"
-            subdir = artifact_dir / f"{unit}_{size_label(size)}"
-            specs[tid] = load_bpe_spec(
-                subdir,
-                tokenizer_id=tid,
-                name=f"BPE {unit} {size_label(size)} (o200k pretok)",
-            )
+    for size in SIZES:
+        tid = tokenizer_id(unit, size)
+        subdir = artifact_dir / artifact_subdir(unit, size)
+        display_unit = UNIT_ID[unit]
+        specs[tid] = load_bpe_spec(
+            subdir,
+            tokenizer_id=tid,
+            name=f"BPE {display_unit} {size_label(size)} (o200k pretok)",
+        )
     return specs
 
 
@@ -93,65 +136,87 @@ def macro_means(df: pd.DataFrame, metric: str) -> pd.Series:
     return tmp.groupby("tokenizer_id")[metric].mean()
 
 
-def build_ab_summary(df: pd.DataFrame) -> pd.DataFrame:
+def build_ab_summary(
+    df: pd.DataFrame,
+    *,
+    baseline_unit: str,
+    compare_unit: str,
+) -> pd.DataFrame:
     rows: list[dict] = []
+    baseline_key = UNIT_ID[baseline_unit]
+    compare_key = UNIT_ID[compare_unit]
     for size in SIZES:
         sl = size_label(size)
-        byte_id = f"bpe_byte_{sl}"
-        graph_id = f"bpe_grapheme_{sl}"
+        base_id = f"bpe_{baseline_key}_{sl}"
+        cmp_id = f"bpe_{compare_key}_{sl}"
         for metric in ("fertility", "chars_per_token", "token_premium", "stfr", "strr"):
-            byte_val = macro_means(df[df["tokenizer_id"] == byte_id], metric)
-            graph_val = macro_means(df[df["tokenizer_id"] == graph_id], metric)
-            b = float(byte_val.get(byte_id, float("nan")))
-            g = float(graph_val.get(graph_id, float("nan")))
+            base_val = macro_means(df[df["tokenizer_id"] == base_id], metric)
+            cmp_val = macro_means(df[df["tokenizer_id"] == cmp_id], metric)
+            b = float(base_val.get(base_id, float("nan")))
+            c = float(cmp_val.get(cmp_id, float("nan")))
             rows.append(
                 {
                     "vocab_size": size,
                     "metric": metric,
-                    "byte": b,
-                    "grapheme": g,
-                    "delta_grapheme_minus_byte": g - b,
-                    "pct_change": ((g - b) / b * 100.0) if b else float("nan"),
+                    baseline_key: b,
+                    compare_key: c,
+                    f"delta_{compare_key}_minus_{baseline_key}": c - b,
+                    "pct_change": ((c - b) / b * 100.0) if b else float("nan"),
                 }
             )
     return pd.DataFrame(rows)
 
 
-def build_focus_ab(df: pd.DataFrame) -> pd.DataFrame:
+def build_focus_ab(
+    df: pd.DataFrame,
+    *,
+    baseline_unit: str,
+    compare_unit: str,
+) -> pd.DataFrame:
     rows: list[dict] = []
     focus = df[df["language"].isin(FOCUS_LANGS)]
+    baseline_key = UNIT_ID[baseline_unit]
+    compare_key = UNIT_ID[compare_unit]
     for size in SIZES:
         sl = size_label(size)
-        byte_id = f"bpe_byte_{sl}"
-        graph_id = f"bpe_grapheme_{sl}"
+        base_id = f"bpe_{baseline_key}_{sl}"
+        cmp_id = f"bpe_{compare_key}_{sl}"
         for lang in FOCUS_LANGS:
             for metric in ("fertility", "token_premium", "stfr", "strr"):
-                b_row = focus[(focus["tokenizer_id"] == byte_id) & (focus["language"] == lang)]
-                g_row = focus[(focus["tokenizer_id"] == graph_id) & (focus["language"] == lang)]
-                if b_row.empty or g_row.empty:
+                b_row = focus[(focus["tokenizer_id"] == base_id) & (focus["language"] == lang)]
+                c_row = focus[(focus["tokenizer_id"] == cmp_id) & (focus["language"] == lang)]
+                if b_row.empty or c_row.empty:
                     continue
                 b = float(b_row.iloc[0][metric]) if pd.notna(b_row.iloc[0][metric]) else float("nan")
-                g = float(g_row.iloc[0][metric]) if pd.notna(g_row.iloc[0][metric]) else float("nan")
+                c = float(c_row.iloc[0][metric]) if pd.notna(c_row.iloc[0][metric]) else float("nan")
                 rows.append(
                     {
                         "vocab_size": size,
                         "language": lang,
                         "metric": metric,
-                        "byte": b,
-                        "grapheme": g,
-                        "delta": g - b,
+                        baseline_key: b,
+                        compare_key: c,
+                        "delta": c - b,
                     }
                 )
     return pd.DataFrame(rows)
 
 
-def per_size_tables(df: pd.DataFrame, out_dir: Path) -> None:
+def per_size_tables(
+    df: pd.DataFrame,
+    out_dir: Path,
+    *,
+    baseline_unit: str,
+    compare_unit: str,
+) -> None:
     metrics = ("fertility", "chars_per_token", "token_premium", "stfr", "strr")
+    baseline_key = UNIT_ID[baseline_unit]
+    compare_key = UNIT_ID[compare_unit]
     for size in SIZES:
         sl = size_label(size)
         subset = df[
             df["tokenizer_id"].isin(
-                [f"bpe_byte_{sl}", f"bpe_grapheme_{sl}", "o200k"]
+                [f"bpe_{baseline_key}_{sl}", f"bpe_{compare_key}_{sl}", "o200k"]
             )
         ]
         for metric in metrics:
@@ -159,7 +224,15 @@ def per_size_tables(df: pd.DataFrame, out_dir: Path) -> None:
             wide.to_csv(out_dir / f"table_{metric}_{sl}.csv")
 
 
-def plot_gap_vs_vocab(ab_summary: pd.DataFrame, out_dir: Path) -> None:
+def plot_gap_vs_vocab(
+    ab_summary: pd.DataFrame,
+    out_dir: Path,
+    *,
+    baseline_unit: str,
+    compare_unit: str,
+) -> None:
+    baseline_key = UNIT_ID[baseline_unit]
+    compare_key = UNIT_ID[compare_unit]
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
 
     for metric, ax, title in (
@@ -168,8 +241,8 @@ def plot_gap_vs_vocab(ab_summary: pd.DataFrame, out_dir: Path) -> None:
     ):
         sub = ab_summary[ab_summary["metric"] == metric].sort_values("vocab_size")
         xs = [s // 1000 for s in sub["vocab_size"]]
-        ax.plot(xs, sub["byte"], marker="o", label="byte BPE")
-        ax.plot(xs, sub["grapheme"], marker="s", label="grapheme BPE")
+        ax.plot(xs, sub[baseline_key], marker="o", label=f"{baseline_key} BPE")
+        ax.plot(xs, sub[compare_key], marker="s", label=f"{compare_key} BPE")
         ax.set_xlabel("Vocab size (thousands)")
         ax.set_ylabel(metric)
         ax.set_title(title)
@@ -177,7 +250,9 @@ def plot_gap_vs_vocab(ab_summary: pd.DataFrame, out_dir: Path) -> None:
         ax.legend()
         ax.grid(True, alpha=0.3)
 
-    fig.suptitle("Baseline vs grapheme gap vs vocab size (FLORES devtest)")
+    fig.suptitle(
+        f"{compare_key} vs {baseline_key} gap vs vocab size (FLORES devtest)"
+    )
     fig.tight_layout()
     fig.savefig(out_dir / "gap_vs_vocab_size.png", dpi=160)
     plt.close(fig)
@@ -186,8 +261,14 @@ def plot_gap_vs_vocab(ab_summary: pd.DataFrame, out_dir: Path) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     artifact_dir: Path = args.artifact_dir
+    baseline_dir = args.baseline_dir or artifact_dir
     out_dir = args.out_dir or artifact_dir
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    baseline_unit = args.baseline_unit
+    compare_unit = args.compare_unit
+    baseline_key = UNIT_ID[baseline_unit]
+    compare_key = UNIT_ID[compare_unit]
 
     print("Loading FLORES devtest...")
     sentences = load_flores_sentences(split="devtest")
@@ -196,7 +277,10 @@ def main(argv: list[str] | None = None) -> int:
     n = len(next(iter(sentences.values())))
     print(f"Evaluating on {len(sentences)} languages × {n} sentences")
 
-    specs = load_sweep_specs(artifact_dir)
+    specs: dict[str, TokenizerSpec] = {}
+    specs.update(load_arm_specs(baseline_dir, baseline_unit))
+    if compare_unit != baseline_unit:
+        specs.update(load_arm_specs(artifact_dir, compare_unit))
     specs["o200k"] = o200k_reference_spec()
 
     rows = []
@@ -217,22 +301,31 @@ def main(argv: list[str] | None = None) -> int:
         json.dump(records, f, indent=2)
     df.to_csv(csv_path, index=False)
 
-    ab_summary = build_ab_summary(df)
-    focus_ab = build_focus_ab(df)
+    ab_summary = build_ab_summary(
+        df, baseline_unit=baseline_unit, compare_unit=compare_unit
+    )
+    focus_ab = build_focus_ab(
+        df, baseline_unit=baseline_unit, compare_unit=compare_unit
+    )
     ab_summary.to_csv(out_dir / "ab_summary_macro.csv", index=False)
     focus_ab.to_csv(out_dir / "ab_summary_focus_langs.csv", index=False)
-    per_size_tables(df, out_dir)
-    plot_gap_vs_vocab(ab_summary, out_dir)
+    per_size_tables(
+        df, out_dir, baseline_unit=baseline_unit, compare_unit=compare_unit
+    )
+    plot_gap_vs_vocab(
+        ab_summary, out_dir, baseline_unit=baseline_unit, compare_unit=compare_unit
+    )
 
-    print("\nMacro A/B delta (grapheme - byte):")
+    print(f"\nMacro A/B delta ({compare_key} - {baseline_key}):")
     for size in SIZES:
         sl = size_label(size)
         print(f"\n  {sl}:")
         chunk = ab_summary[ab_summary["vocab_size"] == size]
         for _, r in chunk.iterrows():
             print(
-                f"    {r['metric']:16s}  byte={r['byte']:.4f}  "
-                f"grapheme={r['grapheme']:.4f}  delta={r['delta_grapheme_minus_byte']:+.4f}"
+                f"    {r['metric']:16s}  {baseline_key}={r[baseline_key]:.4f}  "
+                f"{compare_key}={r[compare_key]:.4f}  "
+                f"delta={r[f'delta_{compare_key}_minus_{baseline_key}']:+.4f}"
             )
 
     print(f"\nWrote results to {out_dir.resolve()}")

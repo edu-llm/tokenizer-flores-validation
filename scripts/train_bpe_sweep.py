@@ -14,8 +14,15 @@ if str(ROOT) not in sys.path:
 from src.bpe_train import save_artifact, train_bpe
 from src.load_flores import LANGUAGES, load_flores_sentences
 
-UNITS = ("byte", "grapheme")
+ALL_UNITS = ("byte", "grapheme", "grapheme_constrained")
 SIZES = (8000, 16000, 32000)
+
+# Subdirectory naming per unit (grapheme_constrained -> gconstr)
+UNIT_DIR = {
+    "byte": "byte",
+    "grapheme": "grapheme",
+    "grapheme_constrained": "gconstr",
+}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -25,6 +32,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path("artifacts/bpe"),
         help="Root directory for trained tokenizer artifacts",
+    )
+    p.add_argument(
+        "--units",
+        nargs="+",
+        choices=ALL_UNITS,
+        default=list(ALL_UNITS),
+        help="Which tokenizer units to train (default: all)",
     )
     p.add_argument(
         "--max-sentences",
@@ -44,6 +58,10 @@ def size_label(size: int) -> str:
     return f"{size // 1000}k"
 
 
+def artifact_label(unit: str, size: int) -> str:
+    return f"{UNIT_DIR[unit]}_{size_label(size)}"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     out_root: Path = args.out_dir
@@ -60,9 +78,9 @@ def main(argv: list[str] | None = None) -> int:
             texts.extend(by_lang[code])
     print(f"Training corpus: {len(texts)} sentences from {len(by_lang)} languages")
 
-    for unit in UNITS:
+    for unit in args.units:
         for size in SIZES:
-            label = f"{unit}_{size_label(size)}"
+            label = artifact_label(unit, size)
             dest = out_root / label
             if not args.force and (dest / "tokenizer.json").exists():
                 print(f"Skipping {label} (artifact exists; use --force to retrain)")
