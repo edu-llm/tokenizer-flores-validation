@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "official_pipeline": {
+    "superbpe_repo": "https://github.com/PythonNut/superbpe.git",
+    "superbpe_commit": "bbd09768fc28a875cef48e6bdd66e3a17454628e",
+    "tokenizers_repo": "https://github.com/alisawuffles/tokenizers-superbpe.git",
+    "tokenizers_commit": "757f2a55c0820ed47064e1fe473deea39b7b611b"
+  },
+  "projection_bytes": 10000000000,
+  "tiers": {
+    "smoke": {
+      "corpus_bytes": 10000000,
+      "vocab_size": 4096,
+      "transition_vocab_size": 3072,
+      "max_rss_gb": 8,
+      "min_available_gb": 2
+    },
+    "pilot": {
+      "corpus_bytes": 100000000,
+      "vocab_size": 16000,
+      "transition_vocab_size": 12000,
+      "max_rss_gb": 20,
+      "min_available_gb": 3
+    },
+    "scale": {
+      "corpus_bytes": 1000000000,
+      "vocab_size": 100000,
+      "transition_vocab_size": 80000,
+      "max_rss_gb": 26,
+      "min_available_gb": 4
+    }
+  },
+  "notes": [
+    "Run tiers in order and stop after any OOM guard or failed parity check.",
+    "Runtime projections are linear estimates; memory must be measured at every tier.",
+    "The final 10 GB tokenizer run belongs on a measured high-memory AWS CPU job."
+  ]
+}

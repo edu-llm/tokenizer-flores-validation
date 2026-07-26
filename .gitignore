@@ -7,3 +7,6 @@ results/
 *.egg-info/
 .DS_Store
 data/
+.cache/
+.venv-benchmark/
+artifacts/tokenizer_benchmark/

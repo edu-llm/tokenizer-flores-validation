@@ -97,6 +97,78 @@ python scripts/export_web_data.py
 
 This is a **training-time** sibling tokenizer (new merge list), not a frozen-o200k wrap. Eval adds Gini of tokens-per-line alongside fertility / premium / STFR / STRR.
 
+## Local BPE/SuperBPE resource benchmark
+
+This benchmark is infrastructure validation for Plan A, not a scientific
+tokenizer result. The smoke corpus may use FLORES `dev` to exercise the
+pipeline, but final tokenizers must train only on the decontaminated pretraining
+mixture and must never consume FLORES or AmericasNLP evaluation data.
+
+On Windows, create an isolated Python 3.11 environment and build the two pinned
+official repositories:
+
+```powershell
+./scripts/setup_tokenizer_benchmark.ps1
+```
+
+Build a deterministic, byte-bounded corpus from explicitly selected language
+files:
+
+```powershell
+python scripts/build_tokenizer_benchmark_corpus.py `
+  --input data/flores200_dataset/dev/eng_Latn.dev <other-language-files> `
+  --output artifacts/tokenizer_benchmark/corpus/train.txt `
+  --manifest artifacts/tokenizer_benchmark/corpus/manifest.json `
+  --target-bytes 10000000
+```
+
+Then run the pinned official pipeline. The BPE arm must complete before the
+SuperBPE continuation:
+
+```powershell
+.venv-benchmark/Scripts/python.exe scripts/run_official_tokenizer_benchmark.py `
+  --arm bpe --superbpe-repo .cache/superbpe `
+  --corpus-dir artifacts/tokenizer_benchmark/corpus `
+  --output-dir artifacts/tokenizer_benchmark/bpe_4k `
+  --result artifacts/tokenizer_benchmark/results/bpe_4k.json `
+  --log artifacts/tokenizer_benchmark/logs/bpe_4k.log `
+  --num-bytes 2495955 --vocab-size 4096 `
+  --patched-tokenizers-commit 757f2a55c0820ed47064e1fe473deea39b7b611b `
+  --max-rss-gb 8 --force
+
+.venv-benchmark/Scripts/python.exe scripts/run_official_tokenizer_benchmark.py `
+  --arm superbpe --superbpe-repo .cache/superbpe `
+  --corpus-dir artifacts/tokenizer_benchmark/corpus `
+  --baseline-dir artifacts/tokenizer_benchmark/bpe_4k `
+  --output-dir artifacts/tokenizer_benchmark/superbpe_4k_t3072 `
+  --result artifacts/tokenizer_benchmark/results/superbpe_4k_t3072.json `
+  --log artifacts/tokenizer_benchmark/logs/superbpe_4k_t3072.log `
+  --num-bytes 2495955 --vocab-size 4096 --transition-vocab-size 3072 `
+  --patched-tokenizers-commit 757f2a55c0820ed47064e1fe473deea39b7b611b `
+  --max-rss-gb 8 --force
+```
+
+Verify that both vocabularies have the requested size and the exact BPE prefix
+was supplied to stage two:
+
+```powershell
+python scripts/verify_official_tokenizer_pair.py `
+  --baseline-dir artifacts/tokenizer_benchmark/bpe_4k `
+  --superbpe-dir artifacts/tokenizer_benchmark/superbpe_4k_t3072 `
+  --transition-vocab-size 3072 --expected-vocab-size 4096 `
+  --result artifacts/tokenizer_benchmark/results/pair_verification.json
+```
+
+`configs/benchmarks/tokenizer_local.json` defines smoke, pilot, and scale gates.
+Each result records process-tree peak RSS, runtime, CPU time, input hash,
+trainer commits, logs, and a clearly marked linear 10 GB runtime projection.
+Memory is not extrapolated; measure every tier and stop if a guard fires.
+
+The same runner is the AWS Batch entrypoint in
+`docker/tokenizer-benchmark/Dockerfile`. AWS only changes corpus/artifact
+staging (S3 to local job storage and back); command arguments and result schemas
+remain identical.
+
 ## Artifacts
 
 - **[PLAN.md](PLAN.md)** — validation plan, decision rule, scope
