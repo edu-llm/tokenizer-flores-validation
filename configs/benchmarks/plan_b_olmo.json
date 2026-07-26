@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "architecture": {
+    "base": "olmo-1b",
+    "n_layers": 16,
+    "d_model": 2048,
+    "n_heads": 16,
+    "vocab_size": 100000,
+    "tie_word_embeddings": true,
+    "dtype": "bf16"
+  },
+  "arms": ["bpe", "superbpe", "parity"],
+  "context": {
+    "bpe_tokens": 2048,
+    "match_effective_bytes": true
+  },
+  "checkpoints": {
+    "equal_bytes": true,
+    "equal_flops_baseline": "bpe",
+    "continue_arms": ["superbpe", "parity"]
+  },
+  "evaluation": {
+    "metrics": [
+      "bpb",
+      "token_premium",
+      "byte_premium",
+      "tokenizer_overhead",
+      "fertility",
+      "chars_per_token",
+      "strr",
+      "stfr",
+      "gini_tokens_per_line"
+    ],
+    "pairwise_deltas": [
+      "superbpe-bpe",
+      "parity-bpe",
+      "superbpe-parity"
+    ]
+  },
+  "aws": {
+    "entrypoints": {
+      "materialize": "scripts/run_plan_b_materialize_shards.py",
+      "requires_ready": "handoff/READY.json"
+    },
+    "notes": [
+      "Materialize three shard trees on CPU Batch before B200 training.",
+      "Prefer sequential B200 runs unless equivalent partitions are proven.",
+      "Do not start Plan B until READY.json validates three tokenizer digests."
+    ]
+  }
+}

@@ -10,3 +10,5 @@ data/
 .cache/
 .venv-benchmark/
 artifacts/tokenizer_benchmark/
+artifacts/plan_a/
+artifacts/plan_b/

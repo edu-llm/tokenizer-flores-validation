@@ -25,7 +25,7 @@ uv venv --clear --python 3.11 ".venv-benchmark"
 $env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY = $null
 uv pip install --python ".venv-benchmark/Scripts/python.exe" `
     ".cache/tokenizers-superbpe/bindings/python" `
-    click filelock psutil pysimdjson "transformers==4.45.2"
+    click filelock psutil pysimdjson regex tiktoken "transformers==4.45.2"
 
 & ".venv-benchmark/Scripts/python.exe" -c @"
 import tokenizers

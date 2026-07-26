@@ -1,12 +1,20 @@
 {
   "schema_version": 1,
+  "arms": ["bpe", "superbpe", "parity"],
   "official_pipeline": {
     "superbpe_repo": "https://github.com/PythonNut/superbpe.git",
     "superbpe_commit": "bbd09768fc28a875cef48e6bdd66e3a17454628e",
     "tokenizers_repo": "https://github.com/alisawuffles/tokenizers-superbpe.git",
     "tokenizers_commit": "757f2a55c0820ed47064e1fe473deea39b7b611b"
   },
+  "parity_pipeline": {
+    "pretok": "official_stage1",
+    "merge_selection": "parity_fair_max_worst_cr_dev",
+    "entrypoint": "scripts/run_parity_tokenizer_benchmark.py",
+    "cr_dev": "FLORES dev + AmericasNLP calibration only"
+  },
   "projection_bytes": 10000000000,
+  "shared_premium_formula": "(r_bpe * r_superbpe * r_parity) ** (1/3)",
   "tiers": {
     "smoke": {
       "corpus_bytes": 10000000,
@@ -31,8 +39,9 @@
     }
   },
   "notes": [
-    "Run tiers in order and stop after any OOM guard or failed parity check.",
+    "Run tiers in order and stop after any OOM guard or failed verification.",
+    "Train the tokenizer triplet on the same corpus manifest before premium calibration.",
     "Runtime projections are linear estimates; memory must be measured at every tier.",
-    "The final 10 GB tokenizer run belongs on a measured high-memory AWS CPU job."
+    "The final 10 GB tokenizer runs belong on measured high-memory AWS CPU jobs."
   ]
 }

@@ -18,7 +18,8 @@ RUN git clone https://github.com/alisawuffles/tokenizers-superbpe.git /opt/token
 RUN git clone https://github.com/PythonNut/superbpe.git /opt/superbpe \
     && git -C /opt/superbpe checkout "${SUPERBPE_COMMIT}" \
     && pip install --no-cache-dir \
-        click filelock psutil pysimdjson "transformers==4.45.2"
+        click filelock psutil pysimdjson regex tiktoken \
+        "transformers==4.45.2"
 
 WORKDIR /workspace
 COPY src/ ./src/
@@ -28,6 +29,9 @@ COPY configs/ ./configs/
 
 ENV PYTHONUNBUFFERED=1
 ENV SUPERBPE_TOKENIZERS_COMMIT="${TOKENIZERS_COMMIT}"
+ENV PYTHONPATH=/workspace
 
+# Default: official BPE/SuperBPE runner. Override for parity:
+#   docker run ... --entrypoint python tokenizer-benchmark:local \
+#     scripts/run_parity_tokenizer_benchmark.py ...
 ENTRYPOINT ["python", "scripts/run_official_tokenizer_benchmark.py"]
-

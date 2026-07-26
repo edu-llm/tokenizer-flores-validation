@@ -169,6 +169,55 @@ The same runner is the AWS Batch entrypoint in
 staging (S3 to local job storage and back); command arguments and result schemas
 remain identical.
 
+### Three-arm Plan A / Plan B (BPE + SuperBPE + Parity)
+
+Parity uses official STAGE1 pretok and fair-max merge selection, then exports
+HF-compatible `vocab.json` / `merges.txt`:
+
+```powershell
+.venv-benchmark/Scripts/python.exe scripts/run_parity_tokenizer_benchmark.py `
+  --train-dir artifacts/plan_a/train_langs `
+  --dev-dir artifacts/plan_a/dev_langs `
+  --output-dir artifacts/plan_a/tokenizers/smoke/parity `
+  --result artifacts/plan_a/results/smoke/parity.json `
+  --log artifacts/plan_a/logs/smoke/parity.log `
+  --num-bytes 2495955 --vocab-size 4096 --max-rss-gb 8 --force
+```
+
+Orchestrate the full triplet, premium calibration, and `READY.json`:
+
+```powershell
+.venv-benchmark/Scripts/python.exe scripts/run_plan_a_tokenizer_triplet.py `
+  --work-dir artifacts/plan_a `
+  --train-lang-dir artifacts/plan_a/train_langs `
+  --dev-lang-dir artifacts/plan_a/dev_langs `
+  --corpus-dir artifacts/tokenizer_benchmark/corpus `
+  --corpus-manifest artifacts/tokenizer_benchmark/corpus/manifest.json `
+  --superbpe-repo .cache/superbpe `
+  --num-bytes 2495955 --vocab-size 4096 --transition-vocab-size 3072 `
+  --stage smoke --force
+```
+
+Plan B CPU materialization (after `handoff/READY.json`):
+
+```powershell
+.venv-benchmark/Scripts/python.exe scripts/run_plan_b_materialize_shards.py `
+  --ready artifacts/plan_a/handoff/READY.json `
+  --documents artifacts/tokenizer_benchmark/corpus/train.txt `
+  --output-dir artifacts/plan_b/materialize `
+  --max-documents 200
+
+.venv-benchmark/Scripts/python.exe scripts/run_plan_b_preflight.py `
+  --ready artifacts/plan_a/handoff/READY.json `
+  --materialization artifacts/plan_b/materialize/materialization.json `
+  --result artifacts/plan_b/preflight_schedule.json
+
+.venv-benchmark/Scripts/python.exe scripts/emit_plan_b_olmo_jobs.py `
+  --preflight artifacts/plan_b/preflight_schedule.json `
+  --materialization artifacts/plan_b/materialize/materialization.json `
+  --result artifacts/plan_b/olmo_job_bundle.json
+```
+
 ## Artifacts
 
 - **[PLAN.md](PLAN.md)** — validation plan, decision rule, scope
