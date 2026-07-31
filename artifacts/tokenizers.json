@@ -46,11 +46,12 @@
     },
     {
       "id": "multi",
-      "name": "NLLB-200 distilled 600M",
+      "name": "NLLB-200 distilled 600M (Unigram)",
       "loader": "transformers.AutoTokenizer",
       "source": "facebook/nllb-200-distilled-600M",
       "frontier": false,
-      "role": "multilingual_baseline"
+      "role": "multilingual_baseline",
+      "family": "Unigram"
     },
     {
       "id": "unigram",

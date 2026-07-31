@@ -208,3 +208,109 @@ body {
   font-size: 0.82rem;
   color: var(--muted);
 }
+
+/* --- Zipf deviation section ------------------------------------------- */
+
+.explanation {
+  white-space: pre-wrap;
+}
+
+.zipf-table {
+  overflow-x: auto;
+}
+
+.zipf-table table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.78rem;
+}
+
+.zipf-table th,
+.zipf-table td {
+  padding: 0.34rem 0.55rem;
+  border-bottom: 1px solid rgba(120, 113, 108, 0.22);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.zipf-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  position: sticky;
+  top: 0;
+  background: var(--bg, #fff);
+}
+
+.zipf-table td.numeric,
+.zipf-table th.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.zipf-table tbody tr:hover {
+  background: rgba(194, 65, 12, 0.06);
+}
+
+.zipf-figure {
+  margin: 0 0 1.75rem;
+}
+
+.zipf-figure img {
+  width: 100%;
+  height: auto;
+  border: 1px solid rgba(120, 113, 108, 0.28);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.zipf-figure figcaption {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.method-step {
+  border: 1px solid rgba(120, 113, 108, 0.28);
+  border-radius: 6px;
+  margin-bottom: 0.5rem;
+  background: rgba(120, 113, 108, 0.04);
+}
+
+.method-step > summary {
+  cursor: pointer;
+  padding: 0.55rem 0.75rem;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--fg, #1c1917);
+  list-style: none;
+}
+
+.method-step > summary::-webkit-details-marker {
+  display: none;
+}
+
+.method-step > summary::before {
+  content: "▸ ";
+  color: #c2410c;
+}
+
+.method-step[open] > summary::before {
+  content: "▾ ";
+}
+
+.method-step > summary:hover {
+  color: #c2410c;
+}
+
+.method-body {
+  padding: 0 0.9rem 0.8rem 1.4rem;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--muted);
+  white-space: pre-wrap;
+  font-variant-numeric: tabular-nums;
+}

@@ -128,7 +128,7 @@ def load_tokenizers(
         "qwen": lambda: _hf_spec("qwen", "Qwen2.5-7B", QWEN_REPO, True),
         "multi": lambda: _hf_spec(
             "multi",
-            "NLLB-200",
+            "NLLB-200 (Unigram)",
             NLLB_REPO,
             False,
             leading_space_for_words=False,

@@ -33,6 +33,16 @@
       >
         Grapheme A/B (experiment)
       </button>
+      <button
+        type="button"
+        class="tab"
+        role="tab"
+        aria-selected="false"
+        aria-controls="tab-zipf"
+        data-tab="zipf"
+      >
+        Zipf deviation
+      </button>
     </nav>
 
     <section id="tab-production" class="tab-panel active" role="tabpanel">
@@ -53,6 +63,58 @@
 
     <section id="tab-experiment" class="tab-panel" role="tabpanel" hidden>
       <div id="experiment-sections"></div>
+    </section>
+
+    <section id="tab-zipf" class="tab-panel" role="tabpanel" hidden>
+      <div id="zipf-missing" class="explanation" hidden>
+        No Zipf results found. Run
+        <code>python scripts/run_vocab_profile.py --out-dir results/zipf</code>,
+        then <code>python scripts/run_zipf_eval.py --out-dir results/zipf</code>,
+        then <code>python scripts/plot_zipf.py --results-dir results/zipf</code>,
+        then re-run <code>python scripts/export_web_data.py</code>.
+      </div>
+
+      <div id="zipf-body" hidden>
+        <aside id="zipf-intro" class="explanation"></aside>
+
+        <section class="panel">
+          <h2>How this is calculated</h2>
+          <p class="legend-note">
+            Every number on this page traces back to one of these steps. Click a
+            step to expand it.
+          </p>
+          <div id="zipf-method"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Vocabulary allocation (Stage 1)</h2>
+          <p class="legend-note" id="zipf-alloc-note"></p>
+          <div id="zipf-profile-table" class="zipf-table"></div>
+        </section>
+
+        <section class="controls">
+          <label for="zipf-view-select">View</label>
+          <select id="zipf-view-select"></select>
+          <label for="zipf-metric-select">Score</label>
+          <select id="zipf-metric-select"></select>
+        </section>
+        <aside id="zipf-view-explanation" class="explanation" aria-live="polite"></aside>
+        <aside id="zipf-metric-explanation" class="explanation" aria-live="polite"></aside>
+
+        <section class="panel heatmap-panel">
+          <h2 id="zipf-heatmap-title">Heatmap</h2>
+          <div id="zipf-heatmap" class="heatmap"></div>
+          <p class="legend-note">
+            Colour scales by severity within this metric across the cells shown.
+            Redder = worse. Bootstrap intervals appear in each cell's tooltip.
+          </p>
+        </section>
+
+        <section class="panel">
+          <h2>Figures</h2>
+          <div id="zipf-figures"></div>
+        </section>
+      </div>
     </section>
 
     <script src="data.js"></script>

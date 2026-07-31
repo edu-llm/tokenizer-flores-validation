@@ -45,7 +45,7 @@ Reference code (Petrov): https://github.com/AleksandarPetrov/tokenization-fairne
 | `glm` | GLM-5.2 | HF `zai-org/GLM-5.2` (tokenizer only) |
 | `llama` | Llama 3.1 | HF `meta-llama/Meta-Llama-3.1-8B` (tokenizer; may need HF auth) |
 | `qwen` | Qwen2.5 | HF `Qwen/Qwen2.5-7B` |
-| `multi` | NLLB-200 multilingual baseline | HF `facebook/nllb-200-distilled-600M` |
+| `multi` | NLLB-200 (Unigram) multilingual baseline | HF `facebook/nllb-200-distilled-600M` |
 
 Pinned IDs: [`artifacts/tokenizers.json`](artifacts/tokenizers.json)
 

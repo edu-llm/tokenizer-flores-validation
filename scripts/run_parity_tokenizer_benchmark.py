@@ -110,6 +110,7 @@ def main(argv: list[str] | None = None) -> int:
             "vocab_size": args.vocab_size,
             "pretok": "official_stage1",
             "merge_selection": "parity_fair_max_worst_cr_dev",
+            "fair_max_score": "tokens_per_line",
         },
     )
     return 0 if result["status"] == "succeeded" else 1

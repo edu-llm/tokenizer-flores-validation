@@ -155,11 +155,13 @@ def train_parity_official(
         raise ValueError("train and CR-dev share no languages after STAGE1 pretok")
     train_freqs = {lang: train_freqs[lang] for lang in shared}
     dev_freqs = {lang: dev_freqs[lang] for lang in shared}
+    dev_n_lines = {lang: len(dev_by_lang[lang]) for lang in shared}
 
     vocab, merges = train_parity_bpe_from_lang_freqs(
         train_freqs,
         dev_freqs,
         target_vocab_size=target_vocab_size,
+        dev_n_lines=dev_n_lines,
     )
     meta = {
         "arm": "parity",
@@ -172,6 +174,8 @@ def train_parity_official(
         "vocab_size": len(vocab),
         "n_merges": len(merges),
         "merge_selection": "parity_fair_max_worst_cr_dev",
+        "fair_max_score": "tokens_per_line",
+        "dev_n_lines": dev_n_lines,
     }
     export_official_bpe_artifacts(output_dir, vocab=vocab, merges=merges, meta=meta)
     return meta

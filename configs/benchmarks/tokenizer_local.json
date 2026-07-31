@@ -11,7 +11,7 @@
     "pretok": "official_stage1",
     "merge_selection": "parity_fair_max_worst_cr_dev",
     "entrypoint": "scripts/run_parity_tokenizer_benchmark.py",
-    "cr_dev": "FLORES dev + AmericasNLP calibration only"
+    "cr_dev": "equal-N FLORES parallel dev + AmericasNLP/reserved nah/yua (build_plan_a_cr_dev.py)"
   },
   "projection_bytes": 10000000000,
   "shared_premium_formula": "(r_bpe * r_superbpe * r_parity) ** (1/3)",

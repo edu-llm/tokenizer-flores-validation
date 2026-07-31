@@ -445,16 +445,27 @@ def _apply_merge_to_lang_state(
         _add_word(new_word, freq, pair_counts, pair_index)
 
 
+def _tokens_per_line(
+    freqs: Counter[tuple[bytes, ...]],
+    n_lines: float,
+) -> float:
+    """Line-normalized token mass used by fair-max CR scoring."""
+    if n_lines <= 0:
+        raise ValueError("n_lines must be positive for fair-max scoring")
+    return _corpus_token_count(freqs) / n_lines
+
+
 def train_parity_bpe_from_lang_freqs(
     train_by_lang: dict[str, Counter[tuple[bytes, ...]]],
     dev_by_lang: dict[str, Counter[tuple[bytes, ...]]],
     *,
     target_vocab_size: int,
+    dev_n_lines: dict[str, int] | None = None,
 ) -> tuple[dict[bytes, int], list[tuple[bytes, bytes]]]:
     """Parity-aware BPE (Foroutan/Meister et al.): fair-max merge selection.
 
     At each step pick the worst-compressed language on the parallel *dev* corpus
-    (max tokens under line-normalized CR), then take the max-frequency pair from
+    (max tokens per line / document mass), then take the max-frequency pair from
     that language's *train* counts, and apply the merge to every language.
     """
     train_freqs = {lang: Counter(freqs) for lang, freqs in train_by_lang.items()}
@@ -462,6 +473,16 @@ def train_parity_bpe_from_lang_freqs(
     langs = sorted(set(train_freqs) & set(dev_freqs))
     if not langs:
         raise ValueError("train_by_lang and dev_by_lang share no languages")
+
+    # Prefer explicit line counts; fall back to pretok mass so unequal CR sizes
+    # still score by rate rather than raw token mass.
+    n_lines: dict[str, float] = {}
+    for lang in langs:
+        if dev_n_lines is not None and lang in dev_n_lines:
+            n_lines[lang] = float(dev_n_lines[lang])
+        else:
+            mass = float(sum(dev_freqs[lang].values()))
+            n_lines[lang] = mass if mass > 0 else 1.0
 
     seed_freqs: Counter[tuple[bytes, ...]] = Counter()
     for freqs in train_freqs.values():
@@ -491,16 +512,17 @@ def train_parity_bpe_from_lang_freqs(
         dev_pair_counts[lang] = pc
         dev_pair_index[lang] = pi
 
+    def _worst_key(lang: str) -> float:
+        return _tokens_per_line(dev_freqs[lang], n_lines[lang])
+
     while len(vocab) < target_vocab_size:
-        # Parallel FLORES: minimizing CR ≡ maximizing tokens (same #lines).
-        worst = max(langs, key=lambda L: _corpus_token_count(dev_freqs[L]))
+        # Minimize CR ≡ maximize tokens/line (robust to unequal CR-dev sizes).
+        worst = max(langs, key=_worst_key)
         pair = best_pair(train_pair_counts[worst])
         if pair is None:
             # Fall back: try any language that still has pairs.
             pair = None
-            for lang in sorted(
-                langs, key=lambda L: _corpus_token_count(dev_freqs[L]), reverse=True
-            ):
+            for lang in sorted(langs, key=_worst_key, reverse=True):
                 pair = best_pair(train_pair_counts[lang])
                 if pair is not None:
                     break
