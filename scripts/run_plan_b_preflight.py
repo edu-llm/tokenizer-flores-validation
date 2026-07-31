@@ -30,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     materialization = json.loads(args.materialization.read_text(encoding="utf-8"))
     if ready.get("kind") != "plan_a_ready":
         raise ValueError("READY.json kind must be plan_a_ready")
-    for arm in ("bpe", "superbpe", "parity"):
+    for arm in ("bpe", "superbpe"):
         if arm not in ready.get("arms", {}):
             raise ValueError(f"READY missing {arm}")
         if arm not in materialization.get("arms", {}):
@@ -42,12 +42,12 @@ def main(argv: list[str] | None = None) -> int:
         "kind": "plan_b_preflight_schedule",
         "ready_sha256": sha256_file(args.ready),
         "materialization_sha256": sha256_file(args.materialization),
-        "arms": ["bpe", "superbpe", "parity"],
+        "arms": ["bpe", "superbpe"],
         "context_tokens_byte_matched": context,
         "equal_byte_target": args.target_train_bytes,
         "equal_flop_baseline": "bpe",
-        "continue_to_equal_flops": ["superbpe", "parity"],
-        "pairwise_deltas": ["superbpe-bpe", "parity-bpe", "superbpe-parity"],
+        "continue_to_equal_flops": ["superbpe"],
+        "pairwise_deltas": ["superbpe-bpe"],
         "status": "ready_for_olmo_training",
         "notes": [
             "Full OLMo-1B training runs on the shared B200 after this CPU preflight.",

@@ -19,9 +19,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bpe-dir", type=Path, required=True)
     parser.add_argument("--superbpe-dir", type=Path, required=True)
-    parser.add_argument("--parity-dir", type=Path, required=True)
     parser.add_argument("--bpe-superbpe-verification", type=Path, required=True)
-    parser.add_argument("--parity-bpe-verification", type=Path, required=True)
     parser.add_argument("--calibration", type=Path, required=True)
     parser.add_argument("--corpus-manifest", type=Path, required=True)
     parser.add_argument("--mixture-shares", type=Path, help="Optional frozen language shares JSON")
@@ -46,14 +44,11 @@ def _arm_digest(directory: Path) -> dict[str, str]:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     bpe_superbpe = json.loads(args.bpe_superbpe_verification.read_text(encoding="utf-8"))
-    parity_bpe = json.loads(args.parity_bpe_verification.read_text(encoding="utf-8"))
     calibration = json.loads(args.calibration.read_text(encoding="utf-8"))
     corpus = json.loads(args.corpus_manifest.read_text(encoding="utf-8"))
 
     if not bpe_superbpe.get("passed"):
         raise RuntimeError("BPE↔SuperBPE verification did not pass")
-    if not parity_bpe.get("passed"):
-        raise RuntimeError("Parity↔BPE contract verification did not pass")
     if not calibration.get("freeze") and args.stage == "final":
         raise RuntimeError("Calibration is not frozen; refuse final READY.json")
 
@@ -70,7 +65,6 @@ def main(argv: list[str] | None = None) -> int:
         "arms": {
             "bpe": _arm_digest(args.bpe_dir),
             "superbpe": _arm_digest(args.superbpe_dir),
-            "parity": _arm_digest(args.parity_dir),
         },
         "verifications": {
             "bpe_superbpe": {
@@ -78,17 +72,12 @@ def main(argv: list[str] | None = None) -> int:
                 "passed": True,
                 "sha256": sha256_file(args.bpe_superbpe_verification),
             },
-            "parity_bpe": {
-                "path": str(args.parity_bpe_verification.resolve()),
-                "passed": True,
-                "sha256": sha256_file(args.parity_bpe_verification),
-            },
         },
         "calibration": {
             "path": str(args.calibration.resolve()),
             "sha256": sha256_file(args.calibration),
             "freeze": bool(calibration.get("freeze")),
-            "shared_premium_formula": "(r_bpe * r_superbpe * r_parity) ** (1/3)",
+            "shared_premium_formula": "(r_bpe * r_superbpe) ** (1/2)",
         },
         "corpus_manifest": {
             "path": str(args.corpus_manifest.resolve()),
@@ -98,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "mixture_shares": mixture,
         "plan_b_inputs": [
-            "tokenizers/final/{bpe,superbpe,parity}",
+            "tokenizers/final/{bpe,superbpe}",
             "manifests/mixture_shares.json",
             "handoff/READY.json",
         ],

@@ -1,4 +1,8 @@
-"""Three-arm shared token-premium calibration for Plan A mixing."""
+"""Shared token-premium calibration for Plan A mixing.
+
+Arm-count agnostic: :func:`shared_premiums` takes the geometric mean over
+whichever arms are supplied. Plan A runs two (``bpe``, ``superbpe``).
+"""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Calibrate shared language shares from BPE / SuperBPE / Parity token premiums."""
+"""Calibrate shared language shares from BPE / SuperBPE token premiums."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     arm_premiums = json.loads(args.premiums.read_text(encoding="utf-8"))
-    required = {"bpe", "superbpe", "parity"}
+    required = {"bpe", "superbpe"}
     missing = required - set(arm_premiums)
     if missing:
         raise ValueError(f"premiums JSON missing arms: {sorted(missing)}")
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     delta = max_share_delta(prior, updated)
     result = {
         "schema_version": 1,
-        "kind": "three_arm_premium_calibration",
+        "kind": "arm_premium_calibration",
         "arms": sorted(required),
         "shared_premiums": shared,
         "target_shares": target,

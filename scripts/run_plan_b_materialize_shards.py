@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize matched OLMo shard manifests for BPE / SuperBPE / Parity.
+"""Materialize matched OLMo shard manifests for BPE / SuperBPE.
 
 Reads Plan A READY.json, tokenizes the same ordered documents with each arm,
 and writes aligned shard JSONL manifests. Runs unchanged locally or on AWS Batch
@@ -41,7 +41,7 @@ def _load_ready(path: Path) -> dict:
     ready = json.loads(path.read_text(encoding="utf-8"))
     if ready.get("kind") != "plan_a_ready":
         raise ValueError(f"Expected plan_a_ready, got {ready.get('kind')}")
-    for arm in ("bpe", "superbpe", "parity"):
+    for arm in ("bpe", "superbpe"):
         if arm not in ready.get("arms", {}):
             raise ValueError(f"READY.json missing arm {arm}")
     return ready
@@ -81,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
     atomic_write_json(args.output_dir / "documents.json", doc_manifest)
 
     summary_arms: dict[str, dict] = {}
-    for arm in ("bpe", "superbpe", "parity"):
+    for arm in ("bpe", "superbpe"):
         artifact_dir = Path(ready["arms"][arm]["directory"])
         tokenizer = load_official_bpe_tokenizer(artifact_dir)
         arm_dir = args.output_dir / "shards" / arm
@@ -140,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     # Byte-matched context suggestion relative to BPE 2048.
     bpe_bpt = summary_arms["bpe"]["bytes_per_token"] or 1.0
     context = {"bpe_context_tokens": 2048}
-    for arm in ("superbpe", "parity"):
+    for arm in ("superbpe",):
         bpt = summary_arms[arm]["bytes_per_token"] or bpe_bpt
         context[f"{arm}_context_tokens"] = max(1, int(round(2048 * bpe_bpt / bpt)))
 

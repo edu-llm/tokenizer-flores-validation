@@ -9,7 +9,7 @@
     "tie_word_embeddings": true,
     "dtype": "bf16"
   },
-  "arms": ["bpe", "superbpe", "parity"],
+  "arms": ["bpe", "superbpe"],
   "context": {
     "bpe_tokens": 2048,
     "match_effective_bytes": true
@@ -17,7 +17,7 @@
   "checkpoints": {
     "equal_bytes": true,
     "equal_flops_baseline": "bpe",
-    "continue_arms": ["superbpe", "parity"]
+    "continue_arms": ["superbpe"]
   },
   "evaluation": {
     "metrics": [
@@ -32,9 +32,7 @@
       "gini_tokens_per_line"
     ],
     "pairwise_deltas": [
-      "superbpe-bpe",
-      "parity-bpe",
-      "superbpe-parity"
+      "superbpe-bpe"
     ]
   },
   "aws": {
@@ -43,9 +41,9 @@
       "requires_ready": "handoff/READY.json"
     },
     "notes": [
-      "Materialize three shard trees on CPU Batch before B200 training.",
+      "Materialize both shard trees on CPU Batch before B200 training.",
       "Prefer sequential B200 runs unless equivalent partitions are proven.",
-      "Do not start Plan B until READY.json validates three tokenizer digests."
+      "Do not start Plan B until READY.json validates both tokenizer digests."
     ]
   }
 }

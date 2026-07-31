@@ -1,37 +1,47 @@
 {
-  "schema_version": 1,
-  "arms": ["bpe", "superbpe", "parity"],
+  "schema_version": 2,
+  "arms": ["bpe", "superbpe"],
   "official_pipeline": {
     "superbpe_repo": "https://github.com/PythonNut/superbpe.git",
     "superbpe_commit": "bbd09768fc28a875cef48e6bdd66e3a17454628e",
     "tokenizers_repo": "https://github.com/alisawuffles/tokenizers-superbpe.git",
     "tokenizers_commit": "757f2a55c0820ed47064e1fe473deea39b7b611b"
   },
-  "parity_pipeline": {
-    "pretok": "official_stage1",
-    "merge_selection": "parity_fair_max_worst_cr_dev",
-    "entrypoint": "scripts/run_parity_tokenizer_benchmark.py",
-    "cr_dev": "equal-N FLORES parallel dev + AmericasNLP/reserved nah/yua (build_plan_a_cr_dev.py)"
-  },
+  "languages": [
+    "eng_Latn",
+    "hun_Latn",
+    "zho_Hans",
+    "hin_Deva",
+    "swh_Latn",
+    "hat_Latn"
+  ],
+  "reference_language": "eng_Latn",
+  "corpus_policy": "equal_bytes_per_language",
+  "max_balanced_corpus_bytes": 1800000000,
+  "max_balanced_corpus_note": "Set by hat_Latn availability (~300 MB in FineWeb-2), the smallest of the six. Any tier whose bytes_per_language exceeds a language's available text must fail the build, not silently shrink.",
   "projection_bytes": 10000000000,
-  "shared_premium_formula": "(r_bpe * r_superbpe * r_parity) ** (1/3)",
+  "projection_note": "Runtime extrapolation constant only. Not an achievable balanced corpus for this language set; see max_balanced_corpus_bytes.",
+  "shared_premium_formula": "(r_bpe * r_superbpe) ** (1/2)",
   "tiers": {
     "smoke": {
-      "corpus_bytes": 10000000,
+      "bytes_per_language": 2000000,
+      "corpus_bytes": 12000000,
       "vocab_size": 4096,
       "transition_vocab_size": 3072,
       "max_rss_gb": 8,
       "min_available_gb": 2
     },
     "pilot": {
-      "corpus_bytes": 100000000,
+      "bytes_per_language": 16000000,
+      "corpus_bytes": 96000000,
       "vocab_size": 16000,
       "transition_vocab_size": 12000,
       "max_rss_gb": 20,
       "min_available_gb": 3
     },
     "scale": {
-      "corpus_bytes": 1000000000,
+      "bytes_per_language": 160000000,
+      "corpus_bytes": 960000000,
       "vocab_size": 100000,
       "transition_vocab_size": 80000,
       "max_rss_gb": 26,
@@ -40,8 +50,11 @@
   },
   "notes": [
     "Run tiers in order and stop after any OOM guard or failed verification.",
-    "Train the tokenizer triplet on the same corpus manifest before premium calibration.",
+    "Train both arms on the same corpus manifest before premium calibration.",
+    "corpus_bytes is derived: bytes_per_language * len(languages). Keep them consistent.",
+    "corpus_dir holds one .txt per language, not a single concatenated train.txt. The official trainer's get_files_with_num_bytes selects whole files, so a single sorted train.txt plus a --num-bytes below its size would train on a language prefix.",
+    "Pass --num-bytes as the exact corpus manifest total so no file is truncated and no file is repeated.",
     "Runtime projections are linear estimates; memory must be measured at every tier.",
-    "The final 10 GB tokenizer runs belong on measured high-memory AWS CPU jobs."
+    "The final scale tokenizer runs belong on measured high-memory AWS CPU jobs."
   ]
 }

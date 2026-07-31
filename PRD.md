@@ -1,15 +1,15 @@
-# PRD — Rescope the BPE / SuperBPE / Parity comparison to 6 high-data languages
+# PRD — Rescope the BPE / SuperBPE comparison to 6 high-data languages
 
 **Status:** Approved, not yet implemented.
-**Scope:** Plan A three-arm tokenizer training (`bpe`, `superbpe`, `parity`) and the
-corpus that feeds it. Does not touch the locked 12-language efficiency scope or the
+**Scope:** Plan A two-arm tokenizer training (`bpe`, `superbpe`) and the corpus that
+feeds it. The former third arm (`parity`) is removed — see §8. Does not touch the locked 12-language efficiency scope or the
 18-language Zipf study.
 
 ---
 
 ## 1. Problem
 
-The Plan A three-arm comparison currently spans 16 languages. Two properties of the
+The Plan A comparison currently spans 16 languages. Two properties of the
 current setup make its results hard to attribute to the tokenizer rather than the data.
 
 ### 1.1 The training corpus is not balanced
@@ -146,9 +146,7 @@ Replace the greedy `collect_sources()` walk with an equal-byte builder:
 - Read one staged file per language from `artifacts/plan_a/raw/fineweb2_samples/{code}.txt`.
 - Truncate each to exactly the per-language budget on a line boundary.
 - Hard-fail — do not silently shrink — if any language is short.
-- Write `corpus/{code}.txt` (one per language, for the official trainer) **and**
-  `train_langs/{code}.txt` (for the parity arm, which reads per-language files via
-  `src/parity_official.py:load_lang_text_dir`).
+- Write `corpus/{code}.txt`, one per language, for the official trainer.
 - Manifest records per-language actual bytes + sha256, the exact total, and an
   assertion that `max(bytes) == min(bytes)` across languages.
 
@@ -175,13 +173,12 @@ hard-fail on any non-FLORES code and remove the now-unreachable `_find_americas_
 - `scripts/eval_plan_a_flores_compression.py` — drop the local `PLAN_A_FLORES_LANGS` /
   `LANG_NAMES` copies and the `load_flores.CONTINENT` import; use `plan_a_langs`.
 - `scripts/stage_plan_a_selected_sources.py` — `TARGET_LANGS` from `plan_a_langs`.
-- `scripts/run_plan_a_tokenizer_triplet.py` — read the corpus manifest and derive
+- `scripts/run_plan_a_tokenizer_pair.py` — read the corpus manifest and derive
   `--num-bytes` from its exact total instead of accepting a hand-passed value; after the
   BPE arm, assert `{output_dir}/meta.json` `train_files` covers all six languages and
   `total_bytes` equals the manifest total.
 
-`scripts/run_parity_tokenizer_benchmark.py` and
-`scripts/run_official_tokenizer_benchmark.py` need no language changes — both are
+`scripts/run_official_tokenizer_benchmark.py` needs no language changes — it is
 directory-driven.
 
 ### 5.5 `configs/benchmarks/tokenizer_local.json`
@@ -194,7 +191,7 @@ Add `max_balanced_corpus_bytes` with a note that `hat_Latn` availability sets it
 
 Following the existing `tests/` style:
 
-- every `plan_a_langs` code has a `corpus/{code}.txt` and a `train_langs/{code}.txt`;
+- every `plan_a_langs` code has a `corpus/{code}.txt`;
 - per-language byte counts are equal;
 - manifest total equals the sum of the on-disk files;
 - `eng_Latn`, the premium reference, is present.
@@ -215,23 +212,25 @@ gitignored; the code that produced it remains in git history.
 
 ## 6. Verification
 
-1. **Unit** — `python -m pytest tests/ -q`. Existing `test_parity_official.py`,
-   `test_fairmax_per_line.py`, `test_premium_calibration.py`, `test_benchmark.py` must
-   still pass, plus the new balance test.
+1. **Unit** — `python -m pytest tests/ -q`. Existing `test_premium_calibration.py`,
+   `test_benchmark.py`, `test_official_bpe_encode.py`, `test_fairmax_per_line.py`,
+   `test_vocab_profile.py` and `test_zipf.py` must still pass, plus the new balance
+   test.
 2. **Pull** — re-run the FineWeb-2 pull at the scale per-language budget and confirm the
    report shows six languages with `truncated: true`, i.e. the dataset had more than we
    took. Any `truncated: false` means that language ran dry and the budget must drop.
    This is the real check on the 300 MB `hat_Latn` figure.
 3. **Balance** — build the smoke corpus; the manifest must report six languages at
    exactly 2,000,000 bytes each, total 12,000,000.
-4. **No prefix training** — run the smoke triplet, then inspect
+4. **No prefix training** — run the smoke pair, then inspect
    `artifacts/plan_a/research_cpu/tokenizers/smoke/bpe/meta.json`: `train_files` must
    list all six per-language files and `total_bytes` must equal the manifest total. This
    is the direct regression check on §1.3.
-5. **Three arms agree on input** — `bpe.json`, `superbpe.json` and `parity.json` must
-   all report the same `input_bytes`.
-6. **Pair contract** — `scripts/verify_official_tokenizer_pair.py` and
-   `scripts/verify_parity_tokenizer_contract.py` must pass, as they do today.
+5. **Both arms agree on input** — `bpe.json` and `superbpe.json` must report the same
+   `input_bytes`.
+6. **Pair contract** — `scripts/verify_official_tokenizer_pair.py` must pass, as it
+   does today: SuperBPE must carry the exact BPE merge prefix up to the transition
+   vocabulary size.
 7. **End-to-end** — `scripts/eval_plan_a_flores_compression.py` on FLORES `devtest`;
    `eng_Latn` premium must be exactly 1.0 and the other five finite and populated.
    Compare the BPE-vs-SuperBPE premium spread on the balanced corpus against the old
@@ -239,12 +238,52 @@ gitignored; the code that produced it remains in git history.
 
 ---
 
-## 7. Open item — watch, do not block
+## 7. Arms
+
+Two: `bpe` (official SuperBPE-repo BPE) and `superbpe` (stage-two continuation off the
+exact BPE merge prefix). The comparison is BPE vs SuperBPE on an identical, balanced
+corpus.
+
+Shared premium is the geometric mean over the arms present,
+`(r_bpe * r_superbpe) ** (1/2)`. `src/premium_calibration.py:shared_premiums` is
+arm-count agnostic, so this needed no formula rework — only the arm set changed.
+
+---
+
+## 8. Removed: the parity arm
+
+The third arm (parity-aware BPE with fair-max merge selection) is **out of scope** and
+has been deleted from the Plan A pipeline: `src/parity_official.py`,
+`scripts/run_parity_tokenizer_benchmark.py`,
+`scripts/verify_parity_tokenizer_contract.py` and `tests/test_parity_official.py` are
+gone; Plan B arm tuples, `configs/benchmarks/*.json`, the Dockerfile comment and the
+orchestrator no longer reference it.
+
+`src/parity_official.py:load_lang_text_dir` was a generic per-language loader that
+`scripts/compute_arm_premiums.py` still needs, so it moved to
+`src/official_bpe_encode.py` with coverage in `tests/test_official_bpe_encode.py`.
+
+Two renames follow from dropping to two arms:
+
+| Was | Now |
+|-----|-----|
+| `scripts/run_plan_a_tokenizer_triplet.py` | `scripts/run_plan_a_tokenizer_pair.py` |
+| `scripts/calibrate_three_arm_premiums.py` | `scripts/calibrate_arm_premiums.py` |
+
+The emitted calibration `kind` changes from `three_arm_premium_calibration` to
+`arm_premium_calibration`.
+
+**Not removed:** the published Section 4 "Parity-aware BPE A/B" experiment
+(commit `dfe9e7f`) is separate prior work and stays intact — `artifacts/bpe_parity/`,
+its web viewer tab and export block in `scripts/export_web_data.py`,
+`scripts/train_bpe_sweep.py`, `scripts/eval_bpe_sweep.py`, the fair-max implementation
+in `src/bpe_train.py`, and `tests/test_fairmax_per_line.py`.
+
+### 8.1 What this forgoes
 
 The pilot parity arm produced token premiums of 4.04 (Amharic), 6.52 (Telugu) and 6.62
 (Odia) — *worse* than plain BPE, which inverts the point of fair-max merge selection.
-All three languages are dropped here, so the rescoped run will not reveal whether that
-was a corpus-skew artifact or a bug in `src/parity_official.py`.
-
-Treat the pilot numbers as **unexplained**, not as fixed by the rescope. If parity still
-misbehaves on the new set, that is a separate debugging task.
+Whether that was a corpus-skew artifact or a bug in the fair-max implementation is now
+**not going to be answered**, since the arm is gone and all three languages are dropped.
+Recorded here so the anomaly is not mistaken for a resolved question. The fair-max code
+itself survives in `src/bpe_train.py` if the arm is ever revived.

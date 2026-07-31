@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate Plan A BPE / SuperBPE / Parity compression metrics on FLORES-200.
+"""Evaluate Plan A BPE / SuperBPE compression metrics on FLORES-200.
 
 Reports fertility, chars/token, token premium vs English, STRR, STFR, and Gini
 of tokens-per-line on FLORES ``devtest`` (held-out eval).
@@ -114,7 +114,6 @@ def main() -> int:
     arms = {
         "bpe": args.tokenizers_root / "bpe",
         "superbpe": args.tokenizers_root / "superbpe",
-        "parity": args.tokenizers_root / "parity",
     }
     for arm, path in arms.items():
         if not path.is_dir():

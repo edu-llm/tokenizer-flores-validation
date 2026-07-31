@@ -169,37 +169,36 @@ The same runner is the AWS Batch entrypoint in
 staging (S3 to local job storage and back); command arguments and result schemas
 remain identical.
 
-### Three-arm Plan A / Plan B (BPE + SuperBPE + Parity)
+### Two-arm Plan A / Plan B (BPE + SuperBPE)
 
-Parity uses official STAGE1 pretok and fair-max merge selection, then exports
-HF-compatible `vocab.json` / `merges.txt`:
+Plan A trains two arms on one balanced corpus: official BPE, and SuperBPE continued
+off the exact BPE merge prefix. Scope and byte budgets are in **[PRD.md](PRD.md)**;
+tier parameters are in `configs/benchmarks/tokenizer_local.json`.
+
+Build the equal-content CR-dev used for premium calibration:
 
 ```powershell
 .venv-benchmark/Scripts/python.exe scripts/build_plan_a_cr_dev.py `
   --output-dir artifacts/plan_a/research_cpu/cr_dev
-
-.venv-benchmark/Scripts/python.exe scripts/run_parity_tokenizer_benchmark.py `
-  --train-dir artifacts/plan_a/train_langs `
-  --dev-dir artifacts/plan_a/research_cpu/cr_dev `
-  --output-dir artifacts/plan_a/tokenizers/smoke/parity `
-  --result artifacts/plan_a/results/smoke/parity.json `
-  --log artifacts/plan_a/logs/smoke/parity.log `
-  --num-bytes 2495955 --vocab-size 4096 --max-rss-gb 8 --force
 ```
 
-Orchestrate the full triplet, premium calibration, and `READY.json`:
+Orchestrate both arms, verification, premium calibration, and `READY.json`:
 
 ```powershell
-.venv-benchmark/Scripts/python.exe scripts/run_plan_a_tokenizer_triplet.py `
+.venv-benchmark/Scripts/python.exe scripts/run_plan_a_tokenizer_pair.py `
   --work-dir artifacts/plan_a `
-  --train-lang-dir artifacts/plan_a/train_langs `
   --dev-lang-dir artifacts/plan_a/research_cpu/cr_dev `
-  --corpus-dir artifacts/tokenizer_benchmark/corpus `
-  --corpus-manifest artifacts/tokenizer_benchmark/corpus/manifest.json `
+  --corpus-dir artifacts/plan_a/research_cpu/corpus `
+  --corpus-manifest artifacts/plan_a/research_cpu/corpus/manifest.json `
   --superbpe-repo .cache/superbpe `
-  --num-bytes 2495955 --vocab-size 4096 --transition-vocab-size 3072 `
+  --num-bytes 12000000 --vocab-size 4096 --transition-vocab-size 3072 `
   --stage smoke --force
 ```
+
+`--num-bytes` must equal the corpus manifest's exact total. `corpus_dir` holds one
+`.txt` per language and the official trainer selects **whole files**, so a smaller
+`--num-bytes` would silently train on a subset of the languages rather than a
+proportional sample of all of them.
 
 Plan B CPU materialization (after `handoff/READY.json`):
 

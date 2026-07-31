@@ -31,7 +31,5 @@ ENV PYTHONUNBUFFERED=1
 ENV SUPERBPE_TOKENIZERS_COMMIT="${TOKENIZERS_COMMIT}"
 ENV PYTHONPATH=/workspace
 
-# Default: official BPE/SuperBPE runner. Override for parity:
-#   docker run ... --entrypoint python tokenizer-benchmark:local \
-#     scripts/run_parity_tokenizer_benchmark.py ...
+# Official BPE/SuperBPE runner; --arm selects which of the two arms to train.
 ENTRYPOINT ["python", "scripts/run_official_tokenizer_benchmark.py"]

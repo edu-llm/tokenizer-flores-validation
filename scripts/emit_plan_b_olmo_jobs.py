@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
         raise RuntimeError("preflight status must be ready_for_olmo_training")
 
     jobs = []
-    for arm in ("bpe", "superbpe", "parity"):
+    for arm in ("bpe", "superbpe"):
         context_key = "bpe_context_tokens" if arm == "bpe" else f"{arm}_context_tokens"
         jobs.append(
             {

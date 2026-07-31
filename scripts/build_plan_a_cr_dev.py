@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build equal-content CR-dev for Plan A parity fair-max and premium calibration.
+"""Build equal-content CR-dev for Plan A premium calibration.
 
 FLORES Plan A languages use parallel ``dev`` line indices ``0..N-1``.
 ``nah_Latn`` / ``yua_Latn`` use AmericasNLP calibration/dev when present; otherwise

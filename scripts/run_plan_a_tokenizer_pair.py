@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Orchestrate Plan A three-arm tokenizer training, verification, and calibration.
+"""Orchestrate Plan A two-arm tokenizer training, verification, and calibration.
 
 Designed for local smoke and AWS Batch: same CLIs and result schemas. Full 10 GB
 / 100k runs belong on measured high-memory Batch jobs after tier gates pass.
@@ -22,7 +22,6 @@ if str(ROOT) not in sys.path:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work-dir", type=Path, required=True)
-    parser.add_argument("--train-lang-dir", type=Path, required=True)
     parser.add_argument("--dev-lang-dir", type=Path, required=True)
     parser.add_argument("--corpus-dir", type=Path, required=True)
     parser.add_argument("--corpus-manifest", type=Path, required=True)
@@ -40,7 +39,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stage", default="smoke", choices=("smoke", "pilot", "final"))
     parser.add_argument("--skip-bpe", action="store_true")
     parser.add_argument("--skip-superbpe", action="store_true")
-    parser.add_argument("--skip-parity", action="store_true")
     parser.add_argument("--force", action="store_true")
     return parser.parse_args(argv)
 
@@ -62,7 +60,6 @@ def main(argv: list[str] | None = None) -> int:
     py = str(args.python)
     bpe_dir = tok / "bpe"
     superbpe_dir = tok / "superbpe"
-    parity_dir = tok / "parity"
 
     if not args.skip_bpe:
         _run(
@@ -130,33 +127,6 @@ def main(argv: list[str] | None = None) -> int:
             ]
         )
 
-    if not args.skip_parity:
-        _run(
-            [
-                py,
-                "scripts/run_parity_tokenizer_benchmark.py",
-                "--train-dir",
-                str(args.train_lang_dir),
-                "--dev-dir",
-                str(args.dev_lang_dir),
-                "--output-dir",
-                str(parity_dir),
-                "--result",
-                str(results / "parity.json"),
-                "--log",
-                str(logs / "parity.log"),
-                "--num-bytes",
-                str(args.num_bytes),
-                "--vocab-size",
-                str(args.vocab_size),
-                "--max-rss-gb",
-                str(args.max_rss_gb),
-                "--min-available-gb",
-                str(args.min_available_gb),
-                *(["--force"] if args.force else []),
-            ]
-        )
-
     _run(
         [
             py,
@@ -176,27 +146,11 @@ def main(argv: list[str] | None = None) -> int:
     _run(
         [
             py,
-            "scripts/verify_parity_tokenizer_contract.py",
-            "--bpe-dir",
-            str(bpe_dir),
-            "--parity-dir",
-            str(parity_dir),
-            "--expected-vocab-size",
-            str(args.vocab_size),
-            "--result",
-            str(results / "parity_bpe_verification.json"),
-        ]
-    )
-    _run(
-        [
-            py,
             "scripts/compute_arm_premiums.py",
             "--bpe-dir",
             str(bpe_dir),
             "--superbpe-dir",
             str(superbpe_dir),
-            "--parity-dir",
-            str(parity_dir),
             "--calibration-dir",
             str(args.dev_lang_dir),
             "--result",
@@ -206,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     _run(
         [
             py,
-            "scripts/calibrate_three_arm_premiums.py",
+            "scripts/calibrate_arm_premiums.py",
             "--premiums",
             str(results / "arm_premiums.json"),
             "--result",
@@ -233,12 +187,8 @@ def main(argv: list[str] | None = None) -> int:
             str(bpe_dir),
             "--superbpe-dir",
             str(superbpe_dir),
-            "--parity-dir",
-            str(parity_dir),
             "--bpe-superbpe-verification",
             str(results / "bpe_superbpe_verification.json"),
-            "--parity-bpe-verification",
-            str(results / "parity_bpe_verification.json"),
             "--calibration",
             str(calibration_path),
             "--corpus-manifest",
@@ -251,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     # Keep a stable copy under work/handoff/READY.json for Plan B consumers.
     shutil.copy2(ready_path, work / "handoff" / "READY.json")
-    print(f"Plan A triplet complete. READY.json -> {work / 'handoff' / 'READY.json'}")
+    print(f"Plan A pair complete. READY.json -> {work / 'handoff' / 'READY.json'}")
     return 0
 
 
