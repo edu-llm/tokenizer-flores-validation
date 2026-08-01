@@ -173,7 +173,9 @@ remain identical.
 
 Plan A trains two arms on one balanced corpus: official BPE, and SuperBPE continued
 off the exact BPE merge prefix. Scope and byte budgets are in **[PRD.md](PRD.md)**;
-tier parameters are in `configs/benchmarks/tokenizer_local.json`.
+where the corpus text comes from and how it reaches S3 is in
+**[DATA_PLAN.md](DATA_PLAN.md)**; tier parameters are in
+`configs/benchmarks/tokenizer_local.json`.
 
 Build the equal-content CR-dev used for premium calibration:
 
