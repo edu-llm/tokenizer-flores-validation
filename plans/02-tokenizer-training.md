@@ -198,7 +198,7 @@ Following the existing `tests/` style:
 
 ### 5.7 Docs
 
-`README.md` and `PLAN.md`: update the language table, the tier budgets, and every Plan A
+`README.md` and `plans/README.md`: update the language table, the tier budgets, and every Plan A
 command example. The README currently hard-codes `--num-bytes 2495955`, which is exactly
 the shape of the §1.3 hazard.
 

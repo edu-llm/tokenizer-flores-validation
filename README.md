@@ -172,9 +172,9 @@ remain identical.
 ### Two-arm Plan A / Plan B (BPE + SuperBPE)
 
 Plan A trains two arms on one balanced corpus: official BPE, and SuperBPE continued
-off the exact BPE merge prefix. Scope and byte budgets are in **[PRD.md](PRD.md)**;
+off the exact BPE merge prefix. Scope and byte budgets are in **[plans/02-tokenizer-training.md](plans/02-tokenizer-training.md)**;
 where the corpus text comes from and how it reaches S3 is in
-**[DATA_PLAN.md](DATA_PLAN.md)**; tier parameters are in
+**[plans/01-data-sourcing.md](plans/01-data-sourcing.md)**; tier parameters are in
 `configs/benchmarks/tokenizer_local.json`.
 
 Build the equal-content CR-dev used for premium calibration:
@@ -397,7 +397,8 @@ Pre-registered hypotheses, as scored in `hypotheses.json`:
 
 ## Artifacts
 
-- **[PLAN.md](PLAN.md)** — validation plan, decision rule, scope
+- **[plans/](plans/)** — all design documents; start at [plans/README.md](plans/README.md)
+- **[plans/completed/efficiency-validation.md](plans/completed/efficiency-validation.md)** — validation plan, decision rule, scope
 - **[artifacts/](artifacts/)** — locked languages, tokenizers, BPE experiment arms (`bpe/`, `bpe_constrained/`, `bpe_skew/`, `bpe_parity/`)
 - **[results/](results/)** — `metrics.json`, wide CSV tables, decision JSON, premium heatmap PNG (gitignored; produced by `run_eval`)
 - **[results/zipf/](results/zipf/)** — vocabulary allocation profile and Zipf deviation fits (gitignored; produced by `run_vocab_profile` + `run_zipf_eval`)

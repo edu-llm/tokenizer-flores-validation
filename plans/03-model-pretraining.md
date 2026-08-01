@@ -10,8 +10,8 @@ the locked 12-language efficiency scope (`src/load_flores.py:LANGUAGES`), and th
 
 ## 1. Problem
 
-`PRD.md` §4 established **equal bytes per language** for the six-language Plan A
-corpus, and `DATA_PLAN.md` documents how to source it. That policy is correct for a
+`plans/02-tokenizer-training.md` §4 established **equal bytes per language** for the six-language Plan A
+corpus, and `plans/01-data-sourcing.md` documents how to source it. That policy is correct for a
 960 MB tokenizer corpus — `hat_Latn` has ~0.77 GB available, so a 160 MB equal share
 is comfortably reachable.
 
@@ -68,10 +68,10 @@ The central clarification. "The corpus" has meant two things; the design separat
 | Size | 960 MB (scale tier) | ~78 GB |
 | Policy | equal bytes per language | UniMax, N=4 |
 | Config | `configs/benchmarks/tokenizer_local.json` | `configs/benchmarks/plan_b_olmo.json` |
-| Docs | `DATA_PLAN.md` §1–§9 | `DATA_PLAN.md` §10 (new) |
+| Docs | `plans/01-data-sourcing.md` §1–§9 | `plans/01-data-sourcing.md` §10 (new) |
 | Status | unchanged | new |
 
-`PRD.md` §4 gains one sentence scoping `equal_bytes_per_language` to the tokenizer
+`plans/02-tokenizer-training.md` §4 gains one sentence scoping `equal_bytes_per_language` to the tokenizer
 corpus, so the two policies stop reading as a contradiction.
 
 ---
@@ -127,7 +127,7 @@ Haitian Creole is the only language the cap binds on. Five of six come out exact
 uniform. **65.3 GB of unique text to acquire**, expanding to 78 GB of training data
 through repetition on the two low-resource languages.
 
-Availability figures come from `DATA_PLAN.md` §2–§3: `hat_Latn` 0.772 GB and
+Availability figures come from `plans/01-data-sourcing.md` §2–§3: `hat_Latn` 0.772 GB and
 `swh_Latn` 4.577 GB summed across the ladder; `hin_Deva`, `hun_Latn`, `zho_Hans` and
 `eng_Latn` are unbounded at this scale.
 
@@ -198,14 +198,14 @@ Uses `src/benchmark.py:atomic_write_json`, as every other script in `scripts/` d
 `target_tokens_arm: "bpe"` is the load-bearing field: it records that 20B is measured on
 the BPE arm and SuperBPE matches on bytes, not tokens.
 
-### 7.4 `DATA_PLAN.md` §10 — pretraining corpus
+### 7.4 `plans/01-data-sourcing.md` §10 — pretraining corpus
 
 New section covering: the distinction from §1's tokenizer corpus, the UniMax table from
 §5.2, per-language unique pool targets, the pool-then-sample ordering, and the S3 layout
 extension (`pretrain/pools/<lang>/` and `pretrain/mixture.json`). §1 gains a pointer to
 §10 so the equal-bytes policy is not mistaken for global.
 
-### 7.5 `PRD.md` §4 — scoping sentence
+### 7.5 `plans/02-tokenizer-training.md` §4 — scoping sentence
 
 One sentence: equal-bytes governs the tokenizer corpus; the pretraining mixture is
 UniMax and lives in the Plan B config.
@@ -259,8 +259,8 @@ Existing tests must still pass unchanged: `test_premium_calibration.py`,
 4. **No stale budget** — grep for `50_000_000_000`; it must not survive as a default.
 5. **Tying is config-driven** — change `tie_word_embeddings` in `plan_b_olmo.json` and
    confirm both the emitted job spec and the job name follow.
-6. **Docs agree** — the §5.2 table in `DATA_PLAN.md` §10 must match `mixture.json`, and
-   `PRD.md` §4 must no longer read as governing both corpora.
+6. **Docs agree** — the §5.2 table in `plans/01-data-sourcing.md` §10 must match `mixture.json`, and
+   `plans/02-tokenizer-training.md` §4 must no longer read as governing both corpora.
 
 ---
 

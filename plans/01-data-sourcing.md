@@ -1,6 +1,6 @@
 # DATA_PLAN — where the corpus comes from and how it reaches S3
 
-**Status:** Sourcing plan for the 6-language Plan A rescope in [PRD.md](PRD.md).
+**Status:** Sourcing plan for the 6-language Plan A rescope in [02-tokenizer-training.md](02-tokenizer-training.md).
 **Scope:** Acquisition and staging of tokenizer *training* text only. Does not cover
 FLORES evaluation data, the locked 12-language efficiency scope
 (`src/load_flores.py:LANGUAGES`), or the 18-language Zipf study (`src/zipf_langs.py`).
