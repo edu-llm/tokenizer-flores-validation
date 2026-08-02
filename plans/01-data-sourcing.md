@@ -35,6 +35,12 @@ convenience copy:
 | pilot | 16,000,000 | 96,000,000 |
 | scale | 160,000,000 | 960,000,000 |
 
+**The scale run needs two tiers staged, not one.** `scale` carries the headline gigatoken
+BPE vs SuperBPE comparison at 100k vocab. `pilot` carries the five-config trainer
+cross-check, which holds bytes at 96 MB and moves only vocab to 100k — the one known
+divergence between trainers grows with vocab size, not corpus size, so that is the axis
+worth isolating. Stage `corpus/scale/` and `corpus/pilot/` both.
+
 ### 1.1 One file per language — not negotiable
 
 The corpus directory must hold **one `.txt` per language**, and `--num-bytes` must equal
@@ -48,6 +54,19 @@ alphabetically-first languages only. See PRD §1.3.
 
 Flattening the per-language files back into one `train.txt` reintroduces that bug
 silently. Nothing errors; the tokenizer is just wrong.
+
+**gigatoken is now the default trainer and reads the opposite shape.** It takes a single
+mmapped file, so `scripts/build_plan_a_research_corpus.py` emits *both* views of the same
+bytes: `langs/<lang>.txt` per language, and `train.txt`, their byte-identical
+concatenation in `PLAN_A_CODES` order. Two consequences:
+
+- **`train.txt` must stay outside `langs/`.** The official trainer globs `*.txt` over the
+  corpus directory and would otherwise count every language twice.
+- **On the gigatoken path the manifest equality check replaces the
+  `meta.json:train_files` assertion.** gigatoken performs no file selection, so the
+  whole-file hazard above cannot arise there; the equal-byte guarantee moves entirely
+  into corpus construction, and `tests/test_plan_a_corpus_balance.py` is where it is
+  proven. The `train_files` check still applies to the official arm of the cross-check.
 
 ---
 
@@ -78,12 +97,86 @@ Note the config-name mappings: Mandarin is `cmn_Hani`, not `zho_Hans`.
 carrying eleven columns, only one of which is `text`. Extracted UTF-8 text will be a
 different number in either direction. This is exactly why PRD §4 requires the pull step
 to record **actual extracted text bytes** and hard-fail on shortfall rather than trust
-this table. `hat_Latn`'s 1.87× is the thinnest margin in the set and the only real risk
-to the scale tier — treat the first full-budget `hat_Latn` pull as the load-bearing
-experiment, not a formality.
+this table. `hat_Latn`'s 1.87× is the thinnest margin in the set, and an earlier revision
+of this section called it the only real risk to the scale tier. **That has since been
+measured and the alarm was wrong.** On extracted text, a full 160 MB `hat_Latn` pull
+consumed 56,461 of the 226,754 available documents, implying
+roughly 0.64–0.70 GB of text, or about **4× the scale budget**
+([04 §6](04-trainer-cross-check.md)). Treat the first full-budget pull of any language as
+a measurement rather than a formality, but the scale tier is not availability-bound.
 
 **Train split only.** `hat_Latn` and `swh_Latn` each carry a `test` split (2,282 and
 12,669 rows). Those stay out of training text.
+
+### 2.2 Line endings and pull headroom
+
+**Pull 176,000,000 bytes per language for the scale tier, not 160,000,000.** The reason is
+not availability — it is that the number of bytes reaching the trainer is smaller than the
+number of bytes on disk, and the guard that was supposed to catch that does not.
+
+`scripts/pull_fineweb2_lang_samples.py:69` opens the destination with
+`dest.open("w", encoding="utf-8")` — text mode, so on Windows every `\n` is written as
+`\r\n`. `scripts/build_plan_a_research_corpus.py:145` then reads each line back as
+`line.rstrip("\r\n").encode("utf-8") + b"\n"`, returning exactly one byte per line. Every
+language loses its own line count. Against the 160,000,000-byte scale budget, the six
+files staged on 2026-08-01 all fall short:
+
+| Language | On disk | Usable LF bytes | Shortfall |
+|---|---:|---:|---:|
+| `hun_Latn` | 160,024,290 | 159,992,318 | **−7,682** |
+| `hin_Deva` | 160,020,931 | 159,996,210 | **−3,790** |
+| `swh_Latn` | 160,053,330 | 159,999,423 | −577 |
+| `hat_Latn` | 160,055,993 | 159,999,532 | −468 |
+| `zho_Hans` | 160,044,390 | 159,999,780 | −220 |
+| `eng_Latn` | 160,051,411 | 159,999,884 | −116 |
+
+**Nothing catches this.** The guard at `build_plan_a_research_corpus.py:128` compares the
+budget against `source.stat().st_size`, which is CRLF-inflated, so it passes. The read
+loop then exhausts the file, `padding = budget - written` comes out large, and the
+remainder is filled with newlines. `max(bytes) == min(bytes)` still holds, the manifest
+still records `equal_bytes_verified: true`, and `tests/test_plan_a_corpus_balance.py`
+still passes — its fixture writes LF-only sources with `write_bytes`, so this path is
+never exercised. The magnitude is trivial, 0.005% at worst. The broken guard is not: it is
+precisely the silent-shrink mechanism §3.1 and [02 §1.1](02-tokenizer-training.md) exist
+to prevent.
+
+**This is not a genuine shortfall, so the budget does not move.** §3.1 permits dropping
+`bytes_per_language` for all six when the ladder is exhausted; that rule does not apply
+here. Fix the pull instead.
+
+Three code changes, and then re-pull:
+
+1. `scripts/pull_fineweb2_lang_samples.py:69` — open with `newline="\n"` so on-disk bytes
+   match the counter the pull already keeps.
+2. `scripts/build_plan_a_research_corpus.py`, in `build_language_file` — bound the padding.
+   Its docstring already states that padding exists only to absorb the 1–3 bytes lost when
+   a UTF-8 cut lands mid-character, so raising when `padding > 3` cleanly separates that
+   legitimate case from a source that ran dry. That is what the `st_size` check was trying
+   and failing to do; keep the existing check as a cheap pre-filter.
+3. `tests/test_plan_a_corpus_balance.py` — add a CRLF fixture. A source written with
+   `\r\n` whose LF content cannot fill the budget must raise, not pad.
+
+Run the pull itself under **`.venv-benchmark/Scripts/python.exe`** (Python 3.11). The
+repo's default environment is Python 3.14, where `datasets` fails on import with a `dill`
+pickling error. Do **not** pass `--skip-existing`: the files on disk are the CRLF ones
+being replaced.
+
+```bash
+.venv-benchmark/Scripts/python.exe scripts/pull_fineweb2_lang_samples.py \
+    --max-bytes-per-lang 176000000 \
+    --output-dir artifacts/plan_a/raw/fineweb2_samples
+```
+
+10% headroom is ample: the pull stops before the next document would exceed the cap, so it
+always lands somewhat under, and 16 MB of slack covers any single document. Disk cost is
+~1.06 GB.
+
+**Pilot regression check.** The pilot corpus built from the CRLF sources has `train.txt`
+sha256 `f92c6f9db02079646f381368cf58d8be8debd4a3e48a5d5e8b7f3973ac530b7c`. The fix changes
+line endings on disk but not the text the builder extracts, so re-pulling the same
+documents in the same order should reproduce that hash exactly. If it differs, the
+upstream stream is not deterministic and the already-published pilot cross-check has to be
+re-run — escalate rather than absorb.
 
 ---
 
@@ -174,6 +267,11 @@ language, and report it alongside the corpus manifest. This is a measurement, no
 assumption; a clean result is worth recording, and a dirty one needs to surface before
 the scale tier, not after.
 
+**No script implements this yet**, and [00 §3.3](00-data-to-s3.md) makes it a Phase A gate
+item. It is the one genuinely new module in the staging work. If it slips, say so
+explicitly — a gate with no implementation passes quietly, which is worse than a gate that
+fails.
+
 ---
 
 ## 7. S3 layout and staging
@@ -183,12 +281,18 @@ the scale tier, not after.
 Nothing account-specific is committed. Set these before running anything:
 
 ```
-CORPUS_S3_ROOT=          # s3://<your-bucket>/<your-prefix>
-AWS_REGION=              # match the ECR / Batch region used by docker/tokenizer-benchmark
+CORPUS_S3_ROOT=          # s3://<your-bucket>/<your-prefix>, no trailing slash
+AWS_REGION=              # match the region the EC2 training host runs in
 ```
 
 Everything below derives from `$CORPUS_S3_ROOT`. Put it wherever suits your account —
 the layout is what matters, not the bucket.
+
+The scale tier runs on a **single memory-optimized EC2 instance with Docker** — no ECR, no
+Batch. The image is built on the host from the repo root
+(`docker/tokenizer-benchmark/Dockerfile` already builds both trainers, gigatoken into its
+own `/opt/venv-gigatoken`). Batch stays on the table for Plan B, which actually needs
+fan-out; five sequential training runs do not.
 
 ### 7.2 Key layout
 
@@ -196,75 +300,145 @@ Keyed by tier so smoke / pilot / scale never collide:
 
 ```
 $CORPUS_S3_ROOT/
-  raw/fineweb2/<tier>/<lang>.txt          # rung-1 pull, one file per language
-  raw/fallback/<rung>/<tier>/<lang>.txt   # present only if the ladder fired
-  corpus/<tier>/<lang>.txt                # equal-byte trainer input, one per language
-  corpus/<tier>/manifest.json             # per-language bytes + sha256, exact total
+  raw/fineweb2/<tier>/<lang>.txt          # rung-1 pull; upload only if provenance
+  raw/fallback/<rung>/<tier>/<lang>.txt   #   must be reproducible from S3 (see §7.5)
+
+  corpus/scale/langs/<lang>.txt           # 6 files, exactly 160,000,000 bytes each
+  corpus/scale/manifest.json              # per-language bytes + sha256, exact total
+  corpus/pilot/langs/<lang>.txt           # 6 files, exactly 16,000,000 bytes each
+  corpus/pilot/manifest.json
+
   cr_dev/<lang>.txt                       # premium-calibration dev, from FLORES dev
-  tokenizers/<tier>/<arm>/                # arm = bpe | superbpe
+  tokenizers/<tier>/<arm>/                # arm = bpe | superbpe; written by the job
   results/<tier>/
 ```
 
-`corpus/<tier>/<lang>.txt` is one file per language for the reason in §1.1.
+`corpus/<tier>/langs/<lang>.txt` is one file per language for the reason in §1.1. The
+`langs/` sub-prefix is what the official trainer receives as its `--corpus-dir`, so
+nothing else may live in it.
+
+[00 §2](00-data-to-s3.md) declares itself an extension of this section and still shows the
+older flat `corpus/<tier>/<lang>.txt`. This section is the authority; sync 00 when it is
+next touched.
+
+**Do not upload `train.txt`.** It is a byte-identical concatenation of `langs/`, so
+uploading it doubles the transfer for nothing. Reconstruct it on the instance by
+concatenating in `manifest.json:train_txt.order` and verify against
+`manifest.json:train_txt.sha256`. That check is exact: if the hash matches, the file is
+right, and if it does not, nothing downstream should run.
 
 ### 7.3 Steps
 
-1. **Pull** into `artifacts/plan_a/raw/` — locally for smoke and pilot, on EC2 for scale.
-2. **Build** the equal-byte corpus. Emit `manifest.json` with per-language bytes, per-file
-   sha256, the exact total, and the rungs used per language (§3.1).
-3. **Upload:**
+Run these once per tier — `scale` first, then `pilot`. The builder writes to a fixed
+output directory and **overwrites in place**, so each tier must be built and uploaded
+before the next is built.
+
+1. **Pull** into `artifacts/plan_a/raw/fineweb2_samples/`, at the headroom budget and under
+   `.venv-benchmark` — see §2.2 for both, neither is optional.
+2. **Build** the equal-byte corpus into `artifacts/plan_a/corpus/`. `manifest.json` records
+   per-language bytes, per-file sha256, `padding_bytes`, the exact total, and the rungs
+   used per language (§3.1).
    ```bash
-   aws s3 sync artifacts/plan_a/research_cpu/corpus/ "$CORPUS_S3_ROOT/corpus/<tier>/" \
-     --exclude manifest.json
-   aws s3 cp artifacts/plan_a/research_cpu/corpus/manifest.json \
-     "$CORPUS_S3_ROOT/corpus/<tier>/manifest.json"
+   python scripts/build_plan_a_research_corpus.py --tier scale
    ```
-   Upload `manifest.json` **last**, so its presence signals a complete prefix.
+3. **Upload, manifest last:**
+   ```bash
+   aws s3 sync artifacts/plan_a/corpus/langs/ "$CORPUS_S3_ROOT/corpus/$TIER/langs/"
+   aws s3 cp artifacts/plan_a/corpus/manifest.json \
+     "$CORPUS_S3_ROOT/corpus/$TIER/manifest.json"
+   ```
+   The manifest's presence is the signal that the prefix is complete, and the downstream
+   jobs are written to trust that. It goes up as its own final command, never in the sync.
 4. **Verify the round trip.** Re-download to a scratch directory and re-hash against the
    manifest. Reuse `src/benchmark.py:sha256_file` — it is already the project's hashing
    helper (see `scripts/run_plan_b_materialize_shards.py:21`). Do not add a second one.
-5. **Consume.** The Batch job (`docker/tokenizer-benchmark/Dockerfile`) pulls
-   `corpus/<tier>/` to local job storage and pushes `tokenizers/` and `results/` back.
-   Command arguments and result schemas are identical to a local run, as `README.md`
-   already promises.
+5. **Consume.** The training host pulls `corpus/<tier>/` to local storage, reconstructs and
+   verifies `train.txt` per §7.2, and pushes `tokenizers/` and `results/` back. Command
+   arguments and result schemas are identical to a local run, as `README.md` already
+   promises.
 
 ### 7.4 Operational choices you own
 
 Not prescribed here — decide per account: region, versioning, encryption, and a lifecycle
-rule expiring `raw/`. The Batch job role needs `s3:GetObject` on `corpus/*` and
-`cr_dev/*`, and `s3:PutObject` on `tokenizers/*` and `results/*`.
+rule expiring `raw/`. The instance role needs `s3:GetObject` on `corpus/*` and `cr_dev/*`,
+and `s3:PutObject` on `tokenizers/*` and `results/*`.
+
+One lifecycle rule that is not optional in practice: **abort incomplete multipart uploads
+after 7 days.** A failed large sync otherwise bills indefinitely for parts that no listing
+shows.
 
 `boto3` is deliberately **not** in `requirements.txt`. The `aws` CLI covers every step
 above, so staging adds no Python dependency to the training image.
 
+**Two prerequisites owned outside the data team.** Raise them at the start; do not wait on
+them to begin pulling.
+
+1. **`supergigatoken` commit `00e61db` is not pushed.** `git ls-remote --heads origin` on
+   that repo returns only `main` at `c64233f`; the pinned commit exists on the local
+   `superbpe-stage1-pretokenizer` branch. `docker/tokenizer-benchmark/Dockerfile:7` pins
+   `GIGATOKEN_COMMIT` to it and clones from GitHub, so **the image cannot build on EC2
+   until that branch is pushed.**
+2. **No AWS infrastructure exists** — no bucket, no IAM roles, no IaC of any kind — and the
+   `aws` CLI is not installed on the dev laptop.
+
 ### 7.5 Transfer size
 
-The scale corpus is 6 × 160 MB = 960 MB. A same-region round trip is minutes and cents.
-Raw pulls are larger and stay local by default — upload `raw/` only if the ladder fired
-and the provenance needs to be reproducible from S3.
+The scale corpus is 6 × 160 MB = 960 MB and the pilot corpus 6 × 16 MB = 96 MB, plus
+`cr_dev`. Not uploading `train.txt` (§7.2) halves what would otherwise go up. A
+same-region round trip is minutes and cents.
+
+Raw pulls are larger — 6 × 176 MB ≈ 1.06 GB at the headroom budget — and stay local by
+default. Upload `raw/` only if the ladder fired and the provenance needs to be
+reproducible from S3.
 
 ---
 
 ## 8. Execution checklist
 
+Prerequisites (§7.4): the `supergigatoken` branch is pushed, and a bucket, region and
+instance role exist.
+
+**Fix and pull**
+
+- [ ] Apply the three code changes in §2.2 — pull `newline="\n"`, the `padding > 3` bound,
+      and the CRLF test fixture.
+- [ ] `python -m pytest tests/ -q` passes, including the new CRLF case.
 - [ ] Re-verify availability for all six configs (§9.1). Numbers below the tier budget
       mean stop and re-plan, not proceed.
-- [ ] Pull rung 1 at the tier's `bytes_per_language`, `train` split only.
+- [ ] Pull rung 1 at **176,000,000 bytes per language**, `train` split only, under
+      `.venv-benchmark`, without `--skip-existing`.
 - [ ] Confirm **no shortfall**: every language reports `truncated: true`, i.e. the source
       had more than we took. A `truncated: false` means that language ran dry — go to §3.
 - [ ] If the ladder fired, dedup across rungs and record rungs per language.
-- [ ] Build the equal-byte corpus; assert `max(bytes) == min(bytes)` across languages.
-- [ ] Run the FLORES `devtest` overlap check (§6).
-- [ ] Upload to `$CORPUS_S3_ROOT`, manifest last.
-- [ ] Verify the round trip by sha256.
-- [ ] Run the tier: `scripts/run_plan_a_tokenizer_pair.py` with `--num-bytes` equal to the
-      manifest total.
-- [ ] Confirm `meta.json` `train_files` lists all six per-language files — the direct
-      regression check on §1.1.
 
-Steps map onto the scripts named in PRD §5; several of those still carry the old
-16-language lists and are rewritten as part of that work. This document is the sourcing
-contract either way.
+**Build, both tiers**
+
+- [ ] Build `scale`; manifest reports six languages at exactly 160,000,000 bytes, total
+      960,000,000, and `padding_bytes` ≤ 1 for each.
+- [ ] Upload `scale`, then build `pilot` — the builder overwrites in place.
+- [ ] `pilot` manifest reports six at exactly 16,000,000, total 96,000,000.
+- [ ] `pilot` `train_txt.sha256` still equals `f92c6f9d…` (§2.2), or the difference is
+      escalated rather than absorbed.
+- [ ] Build `cr_dev` from FLORES `dev`.
+- [ ] Run the FLORES `devtest` overlap check (§6) — **note it is unimplemented**; if it has
+      not been written, record that rather than ticking this box.
+
+**Stage**
+
+- [ ] Upload each tier to `$CORPUS_S3_ROOT/corpus/<tier>/langs/`, manifest last.
+- [ ] Verify the round trip by sha256 for all twelve language files and `cr_dev`.
+- [ ] `manifest.json` is the newest object in each prefix.
+
+**Hand off**
+
+- [ ] On the instance, `train.txt` reconstructed from `langs/` in
+      `manifest.json:train_txt.order` matches `manifest.json:train_txt.sha256`.
+- [ ] For the official arm of the cross-check only, confirm `meta.json` `train_files`
+      lists all six per-language files — the direct regression check on §1.1. On the
+      gigatoken arms the manifest equality check stands in its place.
+
+Steps map onto the scripts named in PRD §5. This document is the sourcing contract either
+way.
 
 ---
 
