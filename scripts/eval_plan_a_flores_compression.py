@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.load_flores import CONTINENT, load_flores_sentences
+from src.load_flores import load_flores_sentences
 from src.metrics import (
     attach_token_premiums,
     gini_for_tokenizer,
@@ -29,39 +29,12 @@ from src.metrics import (
 from src.official_bpe_encode import load_official_bpe_tokenizer
 from src.tokenizers_registry import TokenizerSpec
 
-PLAN_A_FLORES_LANGS = [
-    "eng_Latn",
-    "amh_Ethi",
-    "hau_Latn",
-    "swh_Latn",
-    "ukr_Cyrl",
-    "pol_Latn",
-    "hun_Latn",
-    "tel_Telu",
-    "ory_Orya",
-    "zho_Hans",
-    "tur_Latn",
-    "ayr_Latn",
-    "quy_Latn",
-    "grn_Latn",
-]
+# Single source of truth for the 6-language scope. REGION is Plan A's own map;
+# src.load_flores.CONTINENT belongs to the locked 12-language efficiency scope
+# and is deliberately not extended.
+from src.plan_a_langs import LANG_NAMES, PLAN_A_CODES, REGION
 
-LANG_NAMES = {
-    "eng_Latn": "English",
-    "amh_Ethi": "Amharic",
-    "hau_Latn": "Hausa",
-    "swh_Latn": "Swahili",
-    "ukr_Cyrl": "Ukrainian",
-    "pol_Latn": "Polish",
-    "hun_Latn": "Hungarian",
-    "tel_Telu": "Telugu",
-    "ory_Orya": "Odia",
-    "zho_Hans": "Mandarin",
-    "tur_Latn": "Turkish",
-    "ayr_Latn": "Aymara",
-    "quy_Latn": "Quechua",
-    "grn_Latn": "Guarani",
-}
+PLAN_A_FLORES_LANGS = list(PLAN_A_CODES)
 
 
 def parse_args() -> argparse.Namespace:
@@ -135,7 +108,7 @@ def main() -> int:
     records = rows_to_dicts(rows)
     for r in records:
         r["language_name"] = LANG_NAMES.get(r["language"], r["language"])
-        r["continent"] = CONTINENT.get(r["language"], "Other")
+        r["region"] = REGION.get(r["language"]) or "Reference"
 
     df = pd.DataFrame(records)
     csv_path = args.out_dir / "metrics.csv"

@@ -6,8 +6,9 @@ Every design document for this repo. Read in order — each depends on the one b
 |---|------|--------|--------|
 | **0** | [00-data-to-s3.md](00-data-to-s3.md) | Acquire both corpora and stage them in S3 | Not implemented |
 | **1** | [01-data-sourcing.md](01-data-sourcing.md) | Which dataset each language comes from; fallback ladder; license gate | Sourcing decided; not executed |
-| **2** | [02-tokenizer-training.md](02-tokenizer-training.md) | **Plan A** — BPE vs SuperBPE on 6 languages | Approved, not implemented |
+| **2** | [02-tokenizer-training.md](02-tokenizer-training.md) | **Plan A** — BPE vs SuperBPE on 6 languages | Implemented; runs on gigatoken |
 | **3** | [03-model-pretraining.md](03-model-pretraining.md) | **Plan B** — OLMo-1B at 20B tokens, UniMax mixture | Approved, not implemented |
+| **4** | [04-trainer-cross-check.md](04-trainer-cross-check.md) | Why Plan A trains on gigatoken, and the one place it diverges from the reference | **Measured** — gate green at smoke and pilot |
 | — | [completed/efficiency-validation.md](completed/efficiency-validation.md) | The 12-language FLORES efficiency study that motivated the above | **Done and published** |
 
 ## The two budgets, in one place

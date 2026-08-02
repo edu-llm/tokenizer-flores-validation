@@ -1,13 +1,39 @@
 #!/usr/bin/env python3
-"""Build a Plan A research CPU corpus from staged raw sources.
+"""Build the equal-byte Plan A tokenizer-training corpus.
 
-Uses only ``artifacts/plan_a/raw`` (not FLORES) for tokenizer *training* text.
-Writes per-language train files when language is known; remaining bytes go to
-``multi/unknown.txt`` and the shared ``corpus/train.txt``.
+Every language contributes **exactly** the same number of bytes. That is the
+whole point: the superseded builder concatenated whatever it found in
+filesystem order and produced a 6x skew (48 MB Amharic/Swahili against 8 MB
+for twelve others), which confounded every cross-language premium with the
+mix. See [plans/02-tokenizer-training.md §1.1](../plans/02-tokenizer-training.md).
 
-When ``--cr-dev-manifest`` is supplied, reserved CR-pool line ranges for
-``nah_Latn`` / ``yua_Latn`` are excluded from train so CR-dev never overlaps
-tokenizer training text.
+Two views of the same bytes are written, because the two trainers take
+different input shapes and the cross-check requires they see an identical
+corpus:
+
+``corpus/langs/{code}.txt``
+    One file per language, for the official SuperBPE trainer, which reads a
+    ``corpus_dir`` of ``*.txt``. Pass ``--corpus_dir corpus/langs`` and
+    ``--num-bytes`` equal to the manifest's ``total_bytes`` so
+    ``get_files_with_num_bytes`` takes every file whole and its
+    ``random.seed(0)`` shuffle cannot change the mix.
+
+    **These live in their own subdirectory on purpose.** The official trainer
+    globs every ``*.txt`` in ``corpus_dir``; leaving ``train.txt`` beside them
+    would silently train on the corpus twice over.
+
+``corpus/train.txt``
+    The byte-identical concatenation in ``PLAN_A_CODES`` order, for
+    gigatoken's ``train_superbpe``, which accepts only in-memory bytes or a
+    single mmapped path. Pass ``separator=b"\\n"``: gigatoken strips separator
+    bytes and yields one document per line, which is the same unit HuggingFace's
+    trainer sees when it reads the per-language files line by line. Using the
+    default ``<|endoftext|>`` separator instead would leave the corpus as one
+    document, costing all pretokenization parallelism.
+
+Sources are the staged FineWeb-2 / FineWeb pulls, one ``{code}.txt`` per
+language. A language that cannot supply its full share is a hard failure --
+never a silent shrink, which is how the skew got in.
 """
 
 from __future__ import annotations
@@ -15,201 +41,219 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
-import xml.etree.ElementTree as ET
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RAW = ROOT / "artifacts" / "plan_a" / "raw"
-OUT = ROOT / "artifacts" / "plan_a" / "research_cpu"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+# _fit_utf8 is the project's existing "longest valid UTF-8 prefix within N
+# bytes" helper (src/benchmark.py:77); duplicating it here would create a
+# second one, which CLAUDE.md forbids for sha256_file and applies equally.
+from src.benchmark import _fit_utf8, atomic_write_json
+from src.plan_a_langs import PLAN_A_CODES, PLAN_A_LANGS, SOURCES
+
+DEFAULT_SOURCE_DIR = ROOT / "artifacts" / "plan_a" / "raw" / "fineweb2_samples"
+DEFAULT_OUTPUT_DIR = ROOT / "artifacts" / "plan_a"
+DEFAULT_CONFIG = ROOT / "configs" / "benchmarks" / "tokenizer_local.json"
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--max-bytes", type=int, default=100_000_000)
-    p.add_argument("--output-dir", type=Path, default=OUT)
     p.add_argument(
-        "--cr-dev-manifest",
-        type=Path,
-        default=None,
-        help="cr_dev_manifest.json; excludes reserved CR pool line ranges from train",
+        "--tier",
+        choices=("smoke", "pilot", "scale"),
+        help="Read bytes_per_language from the config's tier table.",
     )
-    return p.parse_args()
+    p.add_argument(
+        "--bytes-per-language",
+        type=int,
+        help="Override the tier budget. Exactly one of --tier / this is required.",
+    )
+    p.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    p.add_argument("--source-dir", type=Path, default=DEFAULT_SOURCE_DIR)
+    p.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    return p.parse_args(argv)
 
 
-def load_cr_exclusions(manifest_path: Path | None) -> dict[str, tuple[int, int, str]]:
-    """Return lang -> (start, end, source_uri) reserved raw-doc ranges to skip."""
-    if manifest_path is None:
-        return {}
-    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    out: dict[str, tuple[int, int, str]] = {}
-    for lang, meta in payload.get("per_language", {}).items():
-        if not meta.get("train_exclude"):
-            continue
-        uri = str(meta["source_uri"])
-        if "reserved_raw_doc_end" in meta:
-            start = int(meta.get("reserved_raw_doc_start", 0))
-            end = int(meta["reserved_raw_doc_end"])
-        else:
-            start = int(meta.get("reserved_line_start", 0))
-            end = int(meta["reserved_line_end"])
-        out[lang] = (start, end, uri)
-    return out
+def resolve_budget(args: argparse.Namespace) -> tuple[int, str | None]:
+    """Per-language byte budget, from an explicit override or the tier table."""
+    if (args.tier is None) == (args.bytes_per_language is None):
+        raise ValueError("Pass exactly one of --tier or --bytes-per-language")
+    if args.bytes_per_language is not None:
+        if args.bytes_per_language <= 0:
+            raise ValueError("--bytes-per-language must be positive")
+        return args.bytes_per_language, None
 
+    config = json.loads(args.config.read_text(encoding="utf-8"))
+    tier = config["tiers"][args.tier]
+    budget = int(tier["bytes_per_language"])
 
-def apply_cr_exclusion(
-    lang: str | None,
-    path: Path,
-    lines: list[str],
-    exclusions: dict[str, tuple[int, int, str]],
-) -> list[str]:
-    if not lang or lang not in exclusions:
-        return lines
-    start, end, source_uri = exclusions[lang]
-    if Path(source_uri).resolve() != path.resolve():
-        # Only skip when this file is the reserved CR pool source.
-        return lines
-    return lines[:start] + lines[end:]
-
-
-def bible_xml_to_lines(path: Path) -> list[str]:
-    text = path.read_text(encoding="utf-8", errors="replace")
-    # Prefer verse-like tags; fall back to stripping tags.
-    lines: list[str] = []
-    try:
-        root = ET.fromstring(text)
-        for el in root.iter():
-            if el.text and el.text.strip():
-                t = re.sub(r"\s+", " ", el.text).strip()
-                if len(t) >= 8:
-                    lines.append(t)
-    except ET.ParseError:
-        stripped = re.sub(r"<[^>]+>", " ", text)
-        for part in re.split(r"[\r\n]+", stripped):
-            t = re.sub(r"\s+", " ", part).strip()
-            if len(t) >= 8:
-                lines.append(t)
-    return lines
-
-
-def collect_sources() -> list[tuple[str | None, Path, str]]:
-    """Return list of (language_hint|None, path, kind)."""
-    found: list[tuple[str | None, Path, str]] = []
-    bible = RAW / "bible-corpus"
-    if bible.exists():
-        for lang_dir in sorted(p for p in bible.iterdir() if p.is_dir()):
-            for xml in lang_dir.glob("*.xml"):
-                found.append((lang_dir.name, xml, "bible_xml"))
-    hf = RAW / "hf"
-    if hf.exists():
-        mapping = {
-            "ngusadeep__Swahili-Corpus-Dataset": "swh_Latn",
-            "Adeptschneider__CiviVox-Swahili-text-corpus": "swh_Latn",
-            "a3xrfgb__amharic-sentences-corpus": "amh_Ethi",
-            "Reubencf__Amharic_corpus": "amh_Ethi",
-            "wjosielct__aymara-spanish-parallel-corpus": "ayr_Latn",
-        }
-        for ds_dir in sorted(p for p in hf.iterdir() if p.is_dir()):
-            sample = ds_dir / "sample.txt"
-            if sample.exists():
-                found.append((mapping.get(ds_dir.name), sample, "hf_sample"))
-    fw = RAW / "fineweb2_samples"
-    if fw.exists():
-        for txt in sorted(fw.glob("*.txt")):
-            found.append((txt.stem, txt, "fineweb2_sample"))
-    return found
-
-
-def main() -> int:
-    args = parse_args()
-    out = args.output_dir
-    train_lang = out / "train_langs"
-    corpus_dir = out / "corpus"
-    for d in (train_lang, corpus_dir):
-        d.mkdir(parents=True, exist_ok=True)
-
-    exclusions = load_cr_exclusions(args.cr_dev_manifest)
-    by_lang: dict[str, list[str]] = {}
-    multi: list[str] = []
-    total = 0
-    sources_meta = []
-
-    for lang, path, kind in collect_sources():
-        if total >= args.max_bytes:
-            break
-        if kind == "bible_xml":
-            lines = bible_xml_to_lines(path)
-        else:
-            lines = [
-                ln.strip()
-                for ln in path.read_text(encoding="utf-8", errors="replace").splitlines()
-                if ln.strip()
-            ]
-        before = len(lines)
-        lines = apply_cr_exclusion(lang, path, lines, exclusions)
-        skipped = before - len(lines)
-        wrote = 0
-        kept: list[str] = []
-        for ln in lines:
-            enc = (ln + "\n").encode("utf-8")
-            if total + len(enc) > args.max_bytes:
-                break
-            kept.append(ln)
-            total += len(enc)
-            wrote += len(enc)
-        if not kept:
-            continue
-        bucket = lang if lang else "multi_unknown"
-        by_lang.setdefault(bucket, []).extend(kept)
-        if not lang:
-            multi.extend(kept)
-        sources_meta.append(
-            {
-                "path": str(path),
-                "language_hint": lang,
-                "kind": kind,
-                "bytes_used": wrote,
-                "lines": len(kept),
-                "cr_lines_excluded": skipped,
-            }
+    # The config carries a derived total; keep the two consistent rather than
+    # trusting either alone.
+    declared_total = int(tier["corpus_bytes"])
+    if declared_total != budget * len(PLAN_A_CODES):
+        raise ValueError(
+            f"config tier {args.tier!r} is inconsistent: corpus_bytes="
+            f"{declared_total:,} but bytes_per_language={budget:,} x "
+            f"{len(PLAN_A_CODES)} languages = {budget * len(PLAN_A_CODES):,}"
         )
 
-    # Write per-lang files
-    for lang, lines in sorted(by_lang.items()):
-        (train_lang / f"{lang}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    ceiling = int(config["max_balanced_corpus_bytes"])
+    if declared_total > ceiling:
+        raise ValueError(
+            f"tier {args.tier!r} needs {declared_total:,} bytes but "
+            f"max_balanced_corpus_bytes is {ceiling:,}"
+        )
+    return budget, args.tier
 
-    # Shared corpus for official BPE/SuperBPE (deterministic lang order)
-    corpus_lines: list[str] = []
-    for lang in sorted(by_lang):
-        corpus_lines.extend(by_lang[lang])
-    train_txt = corpus_dir / "train.txt"
-    payload = "\n".join(corpus_lines) + ("\n" if corpus_lines else "")
-    train_txt.write_text(payload, encoding="utf-8")
-    actual = train_txt.stat().st_size
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    manifest = {
-        "schema_version": 1,
-        "kind": "plan_a_research_cpu_corpus",
-        "actual_bytes": actual,
-        "sha256": digest,
-        "records": len(corpus_lines),
-        "languages": sorted(by_lang),
-        "sources": sources_meta,
-        "cr_dev_manifest": str(args.cr_dev_manifest.resolve())
-        if args.cr_dev_manifest
-        else None,
-        "cr_exclusions": {
-            lang: {"start": start, "end": end, "source_uri": uri}
-            for lang, (start, end, uri) in exclusions.items()
-        },
-        "note": (
-            "Built from staged Plan A raw sources only; FLORES excluded from train. "
-            "Reserved CR-pool lines for nah/yua excluded when --cr-dev-manifest is set."
-        ),
+
+def build_language_file(source: Path, dest: Path, budget: int) -> dict[str, object]:
+    """Write exactly ``budget`` bytes of ``source`` to ``dest``.
+
+    Whole lines are taken while they fit; the final line is cut to the longest
+    valid UTF-8 prefix that still fits. That prefix can land 1-3 bytes short
+    when the cut falls inside a multi-byte character, so the remainder is
+    padded with newlines -- empty lines, immaterial as training text, and the
+    only way to make ``max(bytes) == min(bytes)`` hold exactly. Padding is
+    recorded per language rather than hidden.
+    """
+    if not source.is_file():
+        raise FileNotFoundError(
+            f"No staged source for this language: {source}. Pull it with "
+            "scripts/pull_fineweb2_lang_samples.py before building."
+        )
+    available = source.stat().st_size
+    if available < budget:
+        raise ValueError(
+            f"{source.name} has {available:,} bytes but the budget is "
+            f"{budget:,}. Equal-byte corpora must fail here, not shrink: a "
+            "short language silently reintroduces the mix skew."
+        )
+
+    written = 0
+    lines_written = 0
+    truncated_line = False
+    digest = hashlib.sha256()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    with source.open("r", encoding="utf-8", errors="strict") as src, dest.open("wb") as out:
+        for line in src:
+            if written >= budget:
+                break
+            payload = line.rstrip("\r\n").encode("utf-8") + b"\n"
+            if written + len(payload) > budget:
+                payload = _fit_utf8(payload, budget - written)
+                truncated_line = bool(payload)
+                if not payload:
+                    break
+            out.write(payload)
+            digest.update(payload)
+            written += len(payload)
+            lines_written += 1
+
+        padding = budget - written
+        if padding > 0:
+            pad = b"\n" * padding
+            out.write(pad)
+            digest.update(pad)
+            written += padding
+
+    if written != budget:
+        raise AssertionError(f"{dest.name}: wrote {written:,}, expected {budget:,}")
+
+    return {
+        "bytes": written,
+        "sha256": digest.hexdigest(),
+        "lines": lines_written,
+        "final_line_truncated": truncated_line,
+        "padding_bytes": padding,
+        "source": str(source),
+        "source_bytes_available": available,
     }
-    (corpus_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(manifest, indent=2))
-    print(f"Wrote {train_txt} ({actual} bytes)")
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    budget, tier = resolve_budget(args)
+
+    corpus_dir = args.output_dir / "corpus"
+    # Per-language files get their own directory: the official trainer globs
+    # *.txt in corpus_dir, so train.txt must not sit beside them or it trains
+    # on everything twice.
+    langs_dir = corpus_dir / "langs"
+    langs_dir.mkdir(parents=True, exist_ok=True)
+
+    per_language: dict[str, dict[str, object]] = {}
+    for code in PLAN_A_CODES:
+        source = args.source_dir / f"{code}.txt"
+        per_language[code] = build_language_file(
+            source, langs_dir / f"{code}.txt", budget
+        )
+    stray = sorted(p.name for p in langs_dir.glob("*.txt") if p.stem not in PLAN_A_CODES)
+    if stray:
+        raise AssertionError(
+            f"Unexpected .txt files in {langs_dir}: {stray}. The official "
+            "trainer globs *.txt and would train on them too."
+        )
+
+    sizes = {code: int(meta["bytes"]) for code, meta in per_language.items()}
+    if max(sizes.values()) != min(sizes.values()):
+        raise AssertionError(f"Corpus is not equal-byte: {sizes}")
+
+    # train.txt is the byte-identical concatenation, so the two trainers see
+    # the same corpus and the cross-check compares tokenizers, not inputs.
+    train_txt = corpus_dir / "train.txt"
+    total_digest = hashlib.sha256()
+    with train_txt.open("wb") as out:
+        for code in PLAN_A_CODES:
+            payload = (langs_dir / f"{code}.txt").read_bytes()
+            out.write(payload)
+            total_digest.update(payload)
+
+    total = train_txt.stat().st_size
+    expected_total = budget * len(PLAN_A_CODES)
+    if total != expected_total:
+        raise AssertionError(f"train.txt is {total:,}, expected {expected_total:,}")
+
+    manifest = {
+        "schema_version": 2,
+        "kind": "plan_a_equal_byte_corpus",
+        "tier": tier,
+        "bytes_per_language": budget,
+        "total_bytes": total,
+        "languages": PLAN_A_CODES,
+        "per_language": per_language,
+        "corpus_dir_for_official_trainer": str(langs_dir),
+        "train_txt": {
+            "path": str(train_txt),
+            "sha256": total_digest.hexdigest(),
+            "order": PLAN_A_CODES,
+            "separator": "\\n",
+        },
+        "equal_bytes_verified": True,
+        "notes": [
+            "Pass --corpus-dir corpus/langs and --num-bytes total_bytes to the "
+            "official trainer so get_files_with_num_bytes takes every "
+            "per-language file whole. train.txt is deliberately NOT in that "
+            "directory: the trainer globs *.txt and would double-count.",
+            "Pass separator=b'\\n' to gigatoken so documents are lines, "
+            "matching what HuggingFace's trainer reads from the split files.",
+            "train.txt is the byte-identical concatenation of the per-language "
+            "files in PLAN_A_CODES order.",
+        ],
+    }
+    atomic_write_json(corpus_dir / "manifest.json", manifest)
+
+    for lang in PLAN_A_LANGS:
+        meta = per_language[lang.code]
+        print(
+            f"  {lang.code:10s} {meta['bytes']:>13,} bytes  "
+            f"{meta['lines']:>9,} lines  (of {meta['source_bytes_available']:,} available)"
+        )
+    print(f"\n{len(PLAN_A_CODES)} languages x {budget:,} = {total:,} bytes")
+    print(f"Wrote {corpus_dir}/  (per-language .txt, train.txt, manifest.json)")
     return 0
 
 

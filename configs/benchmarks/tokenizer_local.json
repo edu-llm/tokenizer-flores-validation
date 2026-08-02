@@ -1,11 +1,27 @@
 {
   "schema_version": 2,
   "arms": ["bpe", "superbpe"],
+  "default_pipeline": "gigatoken",
   "official_pipeline": {
     "superbpe_repo": "https://github.com/PythonNut/superbpe.git",
     "superbpe_commit": "bbd09768fc28a875cef48e6bdd66e3a17454628e",
     "tokenizers_repo": "https://github.com/alisawuffles/tokenizers-superbpe.git",
-    "tokenizers_commit": "757f2a55c0820ed47064e1fe473deea39b7b611b"
+    "tokenizers_commit": "757f2a55c0820ed47064e1fe473deea39b7b611b",
+    "note": "Retained as the cross-check reference, not retired. Bumping these commits invalidates every completed tier."
+  },
+  "gigatoken_pipeline": {
+    "repo": "https://github.com/aryanjverma/supergigatoken.git",
+    "commit": "00e61db6e885aedd179ae34540caa6b561e3c185",
+    "branch": "superbpe-stage1-pretokenizer",
+    "commit_note": "Adds the superbpe_stage1 scheme. Never bump without re-running scripts/compare_plan_a_trainers.py; bumping invalidates every completed tier.",
+    "pretokenizer": "superbpe_stage1",
+    "separator": "\n",
+    "max_unit_len": 128,
+    "notes": [
+      "pretokenizer selects the stage-1 scheme. superbpe_stage1 is the official STAGE1_REGEX (o200k family, no contractions, \\p{N}{1,3}); its letter classes include \\p{M} so combining marks stay inside their letter run. The gigatoken default 'gpt2' excludes \\p{M} and fragments hin_Deva, which inflates both its premium and its apparent superword gain.",
+      "separator is \\n, not <|endoftext|>: gigatoken strips separator bytes and yields one document per line, matching the line units HuggingFace's trainer reads from the per-language files. The default separator would leave train.txt as a single document and forfeit pretokenization parallelism.",
+      "Stage 2 takes no regex. Units are bounded by separator, newline, and max_unit_len bytes, so superwords may bridge digits and punctuation that the official STAGE2_REGEX would split. This is a documented deviation: gigatoken's superword space is a strict superset of the official one."
+    ]
   },
   "languages": [
     "eng_Latn",

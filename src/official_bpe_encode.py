@@ -8,10 +8,35 @@ from pathlib import Path
 from tokenizers import Tokenizer
 from tokenizers.decoders import ByteLevel as ByteLevelDecoder
 from tokenizers.models import BPE
-from tokenizers.pre_tokenizers import ByteLevel
 
 
 def load_official_bpe_tokenizer(artifact_dir: Path) -> Tokenizer:
+    """Rebuild an arm's tokenizer from its ``vocab.json`` / ``merges.txt``.
+
+    The model is rebuilt from the raw merge list -- the same bytes
+    ``scripts/verify_official_tokenizer_pair.py`` checks -- but the
+    **pre-tokenizer is taken from the artifact's own ``tokenizer.json``**,
+    because encode-time pretokenization must match what the arm was trained
+    with and that differs per arm *and* per trainer:
+
+    ==================  ==========================================
+    arm / trainer       pre_tokenizer
+    ==================  ==========================================
+    official BPE        ``Split(STAGE1_REGEX)`` + ``ByteLevel(use_regex=False)``
+    official SuperBPE   ``Split(STAGE2_REGEX)`` + ``ByteLevel(use_regex=False)``
+    gigatoken BPE       ``Split(STAGE1_REGEX)`` + ``ByteLevel(use_regex=False)``
+    gigatoken SuperBPE  ``ByteLevel(use_regex=False)`` (no Split)
+    ==================  ==========================================
+
+    Reading it back rather than reconstructing it keeps this self-describing
+    and impossible to drift out of sync.
+
+    This previously hardcoded ``ByteLevel(add_prefix_space=False)``, which
+    leaves ``use_regex=True`` -- i.e. GPT-2 whitespace splitting -- for
+    *both* arms. Superword merges bridge whitespace and BPE cannot merge
+    across pretoken boundaries, so under that path no superword could ever
+    fire and the SuperBPE arm's premiums collapsed toward the BPE arm's.
+    """
     vocab = json.loads((artifact_dir / "vocab.json").read_text(encoding="utf-8"))
     merges: list[tuple[str, str]] = []
     for line in (artifact_dir / "merges.txt").read_text(encoding="utf-8").splitlines():
@@ -20,9 +45,22 @@ def load_official_bpe_tokenizer(artifact_dir: Path) -> Tokenizer:
         left, right = line.split(" ", 1)
         merges.append((left, right))
     tokenizer = Tokenizer(BPE(vocab=vocab, merges=merges, fuse_unk=False))
-    # Shared encode path for premium ratios across arms; STAGE1 is used at train time.
-    tokenizer.pre_tokenizer = ByteLevel(add_prefix_space=False)
-    tokenizer.decoder = ByteLevelDecoder()
+
+    saved_path = artifact_dir / "tokenizer.json"
+    if not saved_path.is_file():
+        raise FileNotFoundError(
+            f"{saved_path} is required: it records the pre-tokenizer this arm "
+            "was trained with. Encoding with any other pre-tokenizer silently "
+            "changes the measured premiums."
+        )
+    saved = Tokenizer.from_file(str(saved_path))
+    if saved.pre_tokenizer is None:
+        raise ValueError(
+            f"{saved_path} carries no pre_tokenizer; cannot determine the "
+            "encode path for this arm."
+        )
+    tokenizer.pre_tokenizer = saved.pre_tokenizer
+    tokenizer.decoder = saved.decoder or ByteLevelDecoder()
     return tokenizer
 
 

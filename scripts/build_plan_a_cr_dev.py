@@ -20,25 +20,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-PLAN_A_FLORES_LANGS = [
-    "eng_Latn",
-    "amh_Ethi",
-    "hau_Latn",
-    "swh_Latn",
-    "ukr_Cyrl",
-    "pol_Latn",
-    "hun_Latn",
-    "tel_Telu",
-    "ory_Orya",
-    "zho_Hans",
-    "tur_Latn",
-    "ayr_Latn",
-    "quy_Latn",
-    "grn_Latn",
-]
+from src.plan_a_langs import PLAN_A_CODES
 
-AMERICAS_CR_LANGS = ["nah_Latn", "yua_Latn"]
-PLAN_A_LANGS = PLAN_A_FLORES_LANGS + AMERICAS_CR_LANGS
+PLAN_A_FLORES_LANGS = list(PLAN_A_CODES)
+
+# All six languages exist in the local FLORES-200 extraction for both dev and
+# devtest, so CR-dev is uniformly parallel. The former AmericasNLP reserved
+# pool for nah_Latn / yua_Latn is unreachable under the 6-language scope --
+# both languages were dropped. See plans/02-tokenizer-training.md §3.
+PLAN_A_LANGS = PLAN_A_FLORES_LANGS
 
 
 def parse_args() -> argparse.Namespace:

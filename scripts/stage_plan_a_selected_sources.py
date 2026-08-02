@@ -67,24 +67,9 @@ BIBLE_RAW = {
     ),
 }
 
-TARGET_LANGS = [
-    "eng_Latn",
-    "amh_Ethi",
-    "hau_Latn",
-    "swh_Latn",
-    "ukr_Cyrl",
-    "pol_Latn",
-    "hun_Latn",
-    "tel_Telu",
-    "ory_Orya",
-    "zho_Hans",
-    "tur_Latn",
-    "ayr_Latn",
-    "quy_Latn",
-    "grn_Latn",
-    "nah_Latn",
-    "yua_Latn",
-]
+from src.plan_a_langs import PLAN_A_CODES
+
+TARGET_LANGS = list(PLAN_A_CODES)
 
 
 def parse_args() -> argparse.Namespace:

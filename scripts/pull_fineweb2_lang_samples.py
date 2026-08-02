@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-"""Pull bounded FineWeb2 / FineWeb samples for all Plan A target languages.
+"""Pull bounded FineWeb2 / FineWeb samples for the Plan A target languages.
 
-FineWeb2 has no English; English comes from HuggingFaceFW/fineweb.
-Guarani uses FineWeb2 ``gug_Latn`` mapped to project code ``grn_Latn``.
-Mandarin uses FineWeb2 ``cmn_Hani`` mapped to ``zho_Hans``.
+The language set and its upstream dataset ids / config names come from
+:mod:`src.plan_a_langs`, the single source of truth for the 6-language scope.
+This script previously carried its own 16-language copy, which drifted from
+the three other copies elsewhere in the tree.
+
+Note the config names are not all the FLORES codes: Mandarin is ``cmn_Hani``.
+FineWeb-2 has no English at all, so ``eng_Latn`` comes from
+``HuggingFaceFW/fineweb`` at ``sample-10BT``.
 """
 
 from __future__ import annotations
@@ -15,33 +20,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.plan_a_langs import PLAN_A_CODES, SOURCES
+
 OUT = ROOT / "artifacts" / "plan_a" / "raw" / "fineweb2_samples"
 
-# project_lang -> (dataset_id, subset_or_None, text_key_hint)
-LANG_SOURCES: dict[str, tuple[str, str | None]] = {
-    "eng_Latn": ("HuggingFaceFW/fineweb", None),  # sample-10BT or default; stream train
-    "amh_Ethi": ("HuggingFaceFW/fineweb-2", "amh_Ethi"),
-    "hau_Latn": ("HuggingFaceFW/fineweb-2", "hau_Latn"),
-    "swh_Latn": ("HuggingFaceFW/fineweb-2", "swh_Latn"),
-    "ukr_Cyrl": ("HuggingFaceFW/fineweb-2", "ukr_Cyrl"),
-    "pol_Latn": ("HuggingFaceFW/fineweb-2", "pol_Latn"),
-    "hun_Latn": ("HuggingFaceFW/fineweb-2", "hun_Latn"),
-    "tel_Telu": ("HuggingFaceFW/fineweb-2", "tel_Telu"),
-    "ory_Orya": ("HuggingFaceFW/fineweb-2", "ory_Orya"),
-    "zho_Hans": ("HuggingFaceFW/fineweb-2", "cmn_Hani"),
-    "tur_Latn": ("HuggingFaceFW/fineweb-2", "tur_Latn"),
-    "ayr_Latn": ("HuggingFaceFW/fineweb-2", "ayr_Latn"),
-    "quy_Latn": ("HuggingFaceFW/fineweb-2", "quy_Latn"),
-    "grn_Latn": ("HuggingFaceFW/fineweb-2", "gug_Latn"),
-    "nah_Latn": ("HuggingFaceFW/fineweb-2", "nah_Latn"),
-    "yua_Latn": ("HuggingFaceFW/fineweb-2", "yua_Latn"),
-}
+# project_lang -> (dataset_id, upstream_config)
+LANG_SOURCES: dict[str, tuple[str, str | None]] = dict(SOURCES)
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--max-bytes-per-lang", type=int, default=8_000_000)
-    p.add_argument("--langs", nargs="*", default=sorted(LANG_SOURCES))
+    p.add_argument("--langs", nargs="*", default=list(PLAN_A_CODES))
     p.add_argument("--output-dir", type=Path, default=OUT)
     p.add_argument("--skip-existing", action="store_true")
     return p.parse_args()
