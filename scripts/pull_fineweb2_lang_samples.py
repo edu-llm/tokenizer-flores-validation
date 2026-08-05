@@ -66,7 +66,9 @@ def stream_lang(dataset_id: str, subset: str | None, dest: Path, max_bytes: int)
             "reason": str(exc),
         }
 
-    with dest.open("w", encoding="utf-8") as out:
+    # newline="\n" so Windows does not inflate each line to CRLF; the byte
+    # counter below tracks LF payloads and must match on-disk size.
+    with dest.open("w", encoding="utf-8", newline="\n") as out:
         for row in ds:
             text = None
             if isinstance(row, dict):

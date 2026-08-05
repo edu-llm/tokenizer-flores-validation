@@ -32,22 +32,25 @@ def main(argv: list[str] | None = None) -> int:
     if preflight.get("status") != "ready_for_olmo_training":
         raise RuntimeError("preflight status must be ready_for_olmo_training")
 
+    arch = config["architecture"]
+    tied = bool(arch["tie_word_embeddings"])
+    tie_suffix = "tied" if tied else "untied"
     jobs = []
     for arm in ("bpe", "superbpe"):
         context_key = "bpe_context_tokens" if arm == "bpe" else f"{arm}_context_tokens"
         jobs.append(
             {
-                "job_name": f"olmo1b-{arm}-100k-tied",
+                "job_name": f"olmo1b-{arm}-100k-{tie_suffix}",
                 "arm": arm,
-                "architecture": config["architecture"],
+                "architecture": arch,
                 "context_tokens": preflight["context_tokens_byte_matched"][context_key],
                 "shard_summary": materialization["arms"][arm],
                 "equal_byte_target": preflight["equal_byte_target"],
                 "equal_flop_baseline": preflight["equal_flop_baseline"],
                 "continue_to_equal_flops": arm in preflight["continue_to_equal_flops"],
                 "seed": 0,
-                "dtype": config["architecture"]["dtype"],
-                "tie_word_embeddings": True,
+                "dtype": arch["dtype"],
+                "tie_word_embeddings": tied,
             }
         )
 

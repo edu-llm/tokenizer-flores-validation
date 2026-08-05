@@ -12,3 +12,10 @@ data/
 artifacts/tokenizer_benchmark/
 artifacts/plan_a/
 artifacts/plan_b/
+paper/tools/
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out
+paper/*.xdv

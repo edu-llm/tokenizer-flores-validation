@@ -189,41 +189,37 @@ another shifts already-published numbers.
 | Pinned commits in `configs/benchmarks/tokenizer_local.json` | `superbpe_commit` and `tokenizers_commit` pin a patched fork. Bumping them invalidates every completed tier. The `official_pipeline` block is retained as the cross-check reference even though `gigatoken` is the default trainer — do not delete it. `gigatoken_pipeline.commit` is subject to the same rule once pinned. |
 | `src/benchmark.py:sha256_file` | The project's one hashing helper. Do not add a second. |
 
-## Not implemented
+## Plan B status
 
-Plan A's tokenizer-training half is now written and runs on gigatoken. Plan B's mixture
-half is still designed but unwritten.
+Mixture + pool acquisition scripts are written. Bytes still need an EC2 pull.
 
-**Missing modules**
+| File | Spec | Status |
+|---|---|---|
+| `src/plan_b_mixture.py` | [03 §5.1](plans/03-model-pretraining.md) | Done |
+| `scripts/build_plan_b_mixture.py` | [03 §7.2](plans/03-model-pretraining.md) | Done |
+| `scripts/pull_plan_b_pools.py` | [00 §4.3](plans/00-data-to-s3.md) | Done — run on EC2 (~300 GB disk) |
+| `tests/test_plan_b_mixture.py` | [03 §9](plans/03-model-pretraining.md) | Done |
+| `run_plan_b_preflight.py` | derives budget from `mixture.json` | Done (no 50 GB default) |
+| `emit_plan_b_olmo_jobs.py` | reads `tie_word_embeddings` from config | Done |
 
-| File | Spec |
-|---|---|
-| `src/plan_b_mixture.py` | [03 §5.1](plans/03-model-pretraining.md) — `unimax_allocation`, pure functions, no I/O |
-| `scripts/build_plan_b_mixture.py` | [03 §7.2](plans/03-model-pretraining.md) — writes `mixture.json` |
-| `scripts/pull_plan_b_pools.py` | [00 §4.3](plans/00-data-to-s3.md) — sharded 65 GB pull preserving document boundaries |
-| `tests/test_plan_b_mixture.py` | [03 §9](plans/03-model-pretraining.md) |
+**Still to execute (ops, not code):**
+
+1. EC2 `pull_plan_b_pools.py` → `artifacts/plan_b/pools/` (~65–74 GB unique text).
+2. Stage/publish into `edullm-data` via `edullm-data/scripts/stage_fineweb2_unimax_pools.py`.
+3. Plan A scale gigatoken train → publish `tokenizer/gigatoken-{bpe,superbpe}`.
+4. Measure bytes/token → `build_plan_b_mixture.py` → materialize `.u32le.bin` → publish token corpora.
 
 **Blocking the smoke-tier gate:** `hin_Deva` and `hat_Latn` are not staged in
 `artifacts/plan_a/raw/fineweb2_samples/` — they are the two languages the rescope added.
-Pull them before building any corpus.
+Pull them before building any Plan A corpus.
 
 **All on-disk Plan A/B artifacts are from the superseded 14/16-language plan** —
 `artifacts/tokenizer_benchmark/*_4k`, `artifacts/plan_a/research_cpu/`,
 `artifacts/plan_b/materialize/`. They are not inputs to anything current.
 
-**Known-wrong values**
-
-- `scripts/build_plan_a_research_corpus.py` — greedy filesystem-order concatenation; produced
-  the 6× skew documented in [02 §1.1](plans/02-tokenizer-training.md). Needs the equal-byte
-  rewrite in §5.2.
-- `scripts/run_plan_b_preflight.py:23` — `--target-train-bytes` defaults to `50_000_000_000`
-  from the superseded 50B-token plan. Must derive from `mixture.json`, with no default.
-- `scripts/emit_plan_b_olmo_jobs.py:50` — hardcodes `tie_word_embeddings: True` although
-  line 39 already passes `config["architecture"]`, which carries the field. Line 40 also
-  bakes `-tied` into the job name.
-
-**Open question:** weight tying. `plan_b_olmo.json:9` says `true`; OLMo-2-0425-1B ships
-`false`. Unresolved, does not affect data volume.
+**Open question:** weight tying. `plan_b_olmo.json` says `true`; OLMo-2-0425-1B ships
+`false`. Unresolved, does not affect data volume. `emit_plan_b_olmo_jobs.py` reads the
+config field rather than hardcoding.
 
 ## Working on different parts
 

@@ -31,12 +31,23 @@ RUN git clone https://github.com/PythonNut/superbpe.git /opt/superbpe \
 # `tokenizers` for the artifact export. This mirrors the local three-env split
 # that CLAUDE.md requires be kept separate. The Rust toolchain installed above
 # for the fork is reused here to build gigatoken's native extension.
-RUN git clone "${GIGATOKEN_REPO}" /opt/gigatoken \
-    && git -C /opt/gigatoken checkout "${GIGATOKEN_COMMIT}" \
+#
+# Prefer a vendored tree at vendor/gigatoken/ (must include Cargo.toml and
+# .git so run_gigatoken_tokenizer_benchmark.py can verify the pin). When that
+# path is only the repo placeholder, fall back to cloning GIGATOKEN_COMMIT.
+COPY vendor/gigatoken/ /tmp/gigatoken-vendor/
+RUN if [ -f /tmp/gigatoken-vendor/Cargo.toml ]; then \
+        mv /tmp/gigatoken-vendor /opt/gigatoken ; \
+    else \
+        rm -rf /tmp/gigatoken-vendor \
+        && git clone "${GIGATOKEN_REPO}" /opt/gigatoken \
+        && git -C /opt/gigatoken checkout "${GIGATOKEN_COMMIT}" ; \
+    fi \
     && python -m venv /opt/venv-gigatoken \
     && /opt/venv-gigatoken/bin/pip install --no-cache-dir maturin tokenizers \
     && /opt/venv-gigatoken/bin/pip install --no-cache-dir /opt/gigatoken \
-    && /opt/venv-gigatoken/bin/python -c "import gigatoken; print(gigatoken.__file__)"
+    && /opt/venv-gigatoken/bin/python -c "import gigatoken; print(gigatoken.__file__)" \
+    && git -C /opt/gigatoken rev-parse HEAD
 
 WORKDIR /workspace
 COPY src/ ./src/

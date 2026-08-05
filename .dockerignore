@@ -1,4 +1,7 @@
 .git
+# Keep the vendored gigatoken pin's .git so the trainer can verify HEAD.
+!vendor/gigatoken/.git
+!vendor/gigatoken/.git/**
 .cache
 .venv*
 artifacts

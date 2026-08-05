@@ -211,15 +211,30 @@ Plan B CPU materialization (after `handoff/READY.json`):
   --output-dir artifacts/plan_b/materialize `
   --max-documents 200
 
+.venv-benchmark/Scripts/python.exe scripts/build_plan_b_mixture.py `
+  --result artifacts/plan_b/mixture.json
+
 .venv-benchmark/Scripts/python.exe scripts/run_plan_b_preflight.py `
   --ready artifacts/plan_a/handoff/READY.json `
   --materialization artifacts/plan_b/materialize/materialization.json `
+  --mixture artifacts/plan_b/mixture.json `
   --result artifacts/plan_b/preflight_schedule.json
 
 .venv-benchmark/Scripts/python.exe scripts/emit_plan_b_olmo_jobs.py `
   --preflight artifacts/plan_b/preflight_schedule.json `
   --materialization artifacts/plan_b/materialize/materialization.json `
   --result artifacts/plan_b/olmo_job_bundle.json
+```
+
+Plan B unique-text pool pull (EC2 in `$AWS_REGION`, ~300 GB disk — **not** a laptop):
+
+```powershell
+pip install zstandard datasets
+.venv-benchmark/Scripts/python.exe scripts/pull_plan_b_pools.py `
+  --output-dir artifacts/plan_b/pools
+# Publish into edullm-data (in-region):
+#   python scripts/stage_fineweb2_unimax_pools.py --pools-dir <pools>
+#   python scripts/publish_fineweb2_unimax_pools.py
 ```
 
 ## Language-specific Zipf deviation

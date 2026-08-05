@@ -154,6 +154,16 @@ def build_language_file(source: Path, dest: Path, budget: int) -> dict[str, obje
             lines_written += 1
 
         padding = budget - written
+        # Padding exists only for a 1–3 byte UTF-8 mid-character cut. Anything
+        # larger means the source ran dry after CRLF inflation or a shortfall
+        # the st_size pre-filter missed — fail hard, do not pad with newlines.
+        if padding > 3:
+            raise ValueError(
+                f"{source.name}: need {padding:,} bytes of padding to reach "
+                f"budget {budget:,} (wrote {written:,}). Padding > 3 means the "
+                "source ran dry (often CRLF-inflated on-disk size); re-pull "
+                "with newline='\\n', do not absorb the shortfall."
+            )
         if padding > 0:
             pad = b"\n" * padding
             out.write(pad)

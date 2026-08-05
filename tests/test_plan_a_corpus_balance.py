@@ -170,3 +170,37 @@ def test_tier_budget_matches_the_config(tmp_path: Path) -> None:
         assert tier["corpus_bytes"] == tier["bytes_per_language"] * len(PLAN_A_CODES), (
             f"tier {name} is inconsistent with the {len(PLAN_A_CODES)}-language scope"
         )
+
+
+def test_crlf_source_that_cannot_fill_budget_raises_not_pads(tmp_path: Path) -> None:
+    """CRLF-inflated on-disk size must not be silently padded with newlines.
+
+    A source whose LF content is short of the budget (but whose CRLF st_size
+    clears the pre-filter) used to pad the remainder — the silent-shrink path
+    §2.2 exists to kill. See plans/01-data-sourcing.md §2.2.
+    """
+    source_dir = tmp_path / "raw"
+    source_dir.mkdir(parents=True)
+    # Enough CRLF bytes to pass st_size >= BUDGET, but too few LF payloads
+    # after rstrip("\\r\\n") + b"\\n" to fill the budget without padding > 3.
+    line = b"x" * 10 + b"\r\n"  # 12 on disk, 11 usable LF bytes per line
+    reps = (BUDGET // len(line)) + 2
+    crlf_bytes = line * reps
+    assert len(crlf_bytes) >= BUDGET
+    usable = sum(len(raw.rstrip(b"\r\n")) + 1 for raw in crlf_bytes.splitlines(keepends=True) if raw)
+    assert usable < BUDGET - 3, (usable, BUDGET)
+
+    for code in PLAN_A_CODES:
+        (source_dir / f"{code}.txt").write_bytes(crlf_bytes)
+
+    with pytest.raises(ValueError, match="padding"):
+        build_main(
+            [
+                "--bytes-per-language",
+                str(BUDGET),
+                "--source-dir",
+                str(source_dir),
+                "--output-dir",
+                str(tmp_path / "out"),
+            ]
+        )

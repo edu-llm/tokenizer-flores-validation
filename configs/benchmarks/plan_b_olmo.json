@@ -7,7 +7,17 @@
     "n_heads": 16,
     "vocab_size": 100000,
     "tie_word_embeddings": true,
+    "_tie_word_embeddings_note": "Open decision: OLMo-2-0425-1B ships false. Do not hardcode in emit_plan_b_olmo_jobs.py — read this field.",
     "dtype": "bf16"
+  },
+  "corpus": {
+    "policy": "unimax",
+    "epoch_cap": 4,
+    "target_tokens": 20000000000,
+    "target_tokens_arm": "bpe",
+    "languages": ["eng_Latn", "hun_Latn", "zho_Hans", "hin_Deva", "swh_Latn", "hat_Latn"],
+    "uniform_over": "tokens",
+    "note": "budget_bytes is derived from measured bytes/token; see mixture.json from scripts/build_plan_b_mixture.py"
   },
   "arms": ["bpe", "superbpe"],
   "context": {
