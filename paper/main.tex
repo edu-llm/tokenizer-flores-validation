@@ -49,7 +49,7 @@ These measured premiums replace the literature's broad $3$--$12\times$ range wit
 Second, we train matched BPE and SuperBPE tokenizers~\citep{liu2025superbpe} on an equal-byte six-language corpus (960\,MB) and evaluate English-relative token premium, fertility, and Zipf deviation on FLORES.
 SuperBPE lowers fertility for every whitespace-delimited language in the set, yet \emph{raises} English-relative premium for Mandarin ($0.912\to 1.082$) and Hungarian ($1.084\to 1.160$)---failure modes consistent with prior BPB evidence that SuperBPE underperforms BPE on these languages~\citep{chowdhury-woolf-2026-benchmarking}, and that make any tokenizer recommendation language-conditional.
 Third, we run a Phase~0 language-model pilot: matched \texttt{olmo2\_100M} models trained for $\sim$2B equal tokens per arm.
-Raw bits/token favors BPE by $+0.84$ micro-average, but fertility-normalized approximate bits-per-byte collapses the gap to roughly $+0.04$ on non-CJK languages, with SuperBPE slightly better only on Haitian Creole.
+Raw bits/token favors BPE by $+0.84$ micro-average, but fertility-normalized approximate bits-per-byte (UTF-8 bytes/token on FLORES) collapses the gap to roughly $+0.025$ on non-CJK languages, with SuperBPE slightly better only on Haitian Creole.
 A planned 1B-parameter UniMax bake-off with true UTF-8 bits-per-byte evaluation is specified; those tables are left empty pending training.
 \end{abstract}
 
@@ -343,15 +343,15 @@ Because SuperBPE tokens cover more text on average, we also report an approximat
 \begin{equation}
   \widetilde{\mathrm{BPB}}(\ell)
   \;=\;
-  \frac{\text{bits/token}(\ell)}{\text{chars/token}(\ell)},
+  \frac{\text{bits/token}(\ell)}{\text{UTF-8 bytes/token}(\ell)},
 \end{equation}
-where chars/token comes from the Study~B FLORES-200 \texttt{devtest} suite (non-whitespace Unicode code points over $\CTC$).
-This tracks UTF-8 BPB closely on Latin scripts; absolute levels on Hindi and Mandarin are inflated relative to true UTF-8 bytes, but within-language BPE-versus-SuperBPE rankings remain informative.
+where bytes/token is measured by encoding FLORES-200 \texttt{devtest} with the same gigatoken tokenizers (total UTF-8 bytes over $\CTC$).
+This is still an approximation of Phase~0 val BPB (FLORES domain, not the FineWeb val shards), but it uses the correct UTF-8 denominator.
 
 \paragraph{Results.}
 Table~\ref{tab:phase0-bits} shows raw bits/token.
 Micro-average bits/token is $5.45$ (BPE) versus $6.29$ (SuperBPE), a gap of $+0.84$ favoring BPE; Mandarin is essentially tied ($-0.05$).
-Table~\ref{tab:phase0-approx-bpb} shows that fertility normalization collapses most of that gap: non-CJK micro $\widetilde{\mathrm{BPB}}$ differs by only $\approx{+}0.04$, and SuperBPE is slightly better on Haitian Creole alone.
+Table~\ref{tab:phase0-approx-bpb} shows that fertility normalization collapses most of that gap: non-CJK micro $\widetilde{\mathrm{BPB}}$ differs by only $\approx{+}0.025$, and SuperBPE is slightly better on Haitian Creole alone.
 Equal-token matching itself biases against SuperBPE (fewer unique bytes seen for the same token budget), so Phase~0 is a smoke gate, not a kill gate for the equal-byte 1B comparison.
 
 \begin{table}[t]
@@ -377,22 +377,23 @@ Micro          & 5.453 & 43.82 & 6.289 &  78.20 & $+0.836$ \\
 
 \begin{table}[t]
 \centering
-\caption{Phase~0 approximate BPB: bits/token divided by Study~B FLORES chars/token.
-Negative $\Delta$ favors SuperBPE. Absolute Mandarin/Hindi levels are inflated vs.\ true UTF-8 BPB.}
+\caption{Phase~0 approximate BPB: bits/token divided by FLORES-200 UTF-8 bytes/token
+(same gigatoken tokenizers). Negative $\Delta$ favors SuperBPE.
+Domain caveat: fertility is FLORES, not Phase~0 FineWeb val text.}
 \label{tab:phase0-approx-bpb}
 \small
 \begin{tabular}{@{}lrrr@{}}
 \toprule
 Language & BPE $\widetilde{\mathrm{BPB}}$ & SuperBPE $\widetilde{\mathrm{BPB}}$ & $\Delta$ \\
 \midrule
-English        & 1.450 & 1.488 & $+0.038$ \\
-Haitian Creole & 1.785 & 1.772 & $-0.013$ \\
-Hindi          & 1.459 & 1.529 & $+0.070$ \\
-Hungarian      & 1.332 & 1.415 & $+0.084$ \\
-Swahili        & 1.346 & 1.363 & $+0.016$ \\
-Mandarin       & 4.078 & 4.086 & $+0.008$ \\
+English        & 1.219 & 1.252 & $+0.032$ \\
+Haitian Creole & 1.419 & 1.409 & $-0.010$ \\
+Hindi          & 0.461 & 0.483 & $+0.022$ \\
+Hungarian      & 1.055 & 1.121 & $+0.066$ \\
+Swahili        & 1.147 & 1.161 & $+0.014$ \\
+Mandarin       & 1.425 & 1.428 & $+0.003$ \\
 \midrule
-Micro (non-CJK)& 1.475 & 1.514 & $+0.039$ \\
+Micro (non-CJK)& 1.060 & 1.085 & $+0.025$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -480,7 +481,7 @@ Study~A is encode-only: it measures token tax, not downstream task quality.
 Study~B's language set excludes Amharic, Odia, Hausa, and dialectal Arabic, so the SuperBPE recommendation does not yet cover Study~A's highest-tax scripts.
 The three studies in this codebase (12-language efficiency, 18-language Zipf, 6-language Plan~A/B) use non-overlapping language locks; numbers must not be pooled without labels.
 Gigatoken~/\,\texttt{supergigatoken}'s Hindi SuperBPE stage-2 deviation (\S\ref{sec:hindi-caveat}) means Hindi SuperBPE premiums are not directly comparable to published Liu et~al.\ numbers.
-Phase~0 matches equal tokens rather than equal bytes, and its $\widetilde{\mathrm{BPB}}$ uses FLORES characters-per-token rather than UTF-8 byte lengths on the Phase~0 val shards; Latin scripts approximate true BPB, while Hindi and Mandarin absolute levels are inflated.
+Phase~0 matches equal tokens rather than equal bytes, and its $\widetilde{\mathrm{BPB}}$ uses FLORES UTF-8 bytes/token rather than paired byte lengths on the Phase~0 FineWeb val shards (domain mismatch).
 The 1B LM bake-off is specified but not executed; Tables~\ref{tab:bpb-flores}--\ref{tab:bpb-americas} are empty by design.
 
 \section{Conclusion}
